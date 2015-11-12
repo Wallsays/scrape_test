@@ -43,7 +43,7 @@ end
 # DB.add_column :items, :name, :text, :unique => true, :null => false
 # DB.add_column :items, :category, :text, :default => 'ruby'
 dataset = DB[:cars]
-
+# dataset.filter(year: 2009).map(:id) => [16, 26, 29]
 
 Capybara.default_driver = :poltergeist
 # Capybara.javascript_driver = :poltergeist
@@ -54,19 +54,12 @@ Capybara.register_driver :poltergeist do |app|
   Capybara::Poltergeist::Driver.new(app, phantomjs_options: ['--load-images=false', '--disk-cache=false'])
 end
 
-
-# all cities
-# http://auto.drom.ru/hyundai/coupe/?minyear=2007&transmission=2&order=year&go_search=2
-# Nsk reg
-# http://auto.drom.ru/region54/hyundai/coupe/?minyear=2007&transmission=2&order=year&go_search=2007
-# Nsk 
-# http://novosibirsk.drom.ru/hyundai/coupe/?minyear=2007&transmission=2&order=year&go_search=2007
-
 include Capybara::DSL
 
 domain = "auto.drom.ru"
-region = '' 
-# region = 'region54/'
+# city = '' 
+# region = '' 
+region = 'region54'
 firm_id = 'hyundai'
 model_id = %w(coupe tiburon tuscani)
 # model_id = %w(coupe)
@@ -74,7 +67,12 @@ min_year = 2008
 # firm_id = 'toyota'
 # model_id = %w(celica)
 transmission_id = 2 # autoamatic
+minprice = 300000
+maxprice = 1000000
 # privod = 2 # 1 - передний, 2 - задний, 3 - 4WD 
+model_id ||= nil
+minprice ||= 0
+maxprice ||= 0
 privod ||= 0
 min_year ||= 0 
 page = ''
@@ -102,19 +100,55 @@ cars = []
 current_car = Hash.new
 model_cnt = 0
 
+def generate_url(region, firm_id, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
+  # all cities
+  # http://auto.drom.ru/hyundai/coupe/?minyear=2007&transmission=2&order=year&go_search=2
+  # Nsk reg
+  # http://auto.drom.ru/region54/hyundai/coupe/?minyear=2007&transmission=2&order=year&go_search=2007
+  # Nsk 
+  # http://novosibirsk.drom.ru/hyundai/coupe/?minyear=2007&transmission=2&order=year&go_search=2007
+
+  # "http://#{domain}/#{region}#{firm_id}/#{model_id[model_cnt]}#{page}/?go_search=2&minyear=#{min_year}&transmission=#{transmission_id}&privod=#{privod}&order=year"
+  url = 'http://'
+  url += if region
+    'auto.drom.ru/region54/'
+  elsif city
+    'novosibirsk.drom.ru/'
+  else
+    'auto.drom.ru/'
+  end
+
+  url += if firm_id
+    firm_id + '/'
+  end
+
+  url += if model_id
+    model_id[model_cnt] + '/'
+  else
+    ''
+  end
+
+  url += "?go_search=2&minyear=#{min_year}&minprice=#{minprice}&maxprice=#{maxprice}&transmission=#{transmission_id}&privod=#{privod}&order=year"
+end
+
 # Start up a new thread
 session = Capybara::Session.new(:poltergeist)
 # Report using a particular user agent
 session.driver.headers = { 'User-Agent' => "Mozilla/5.0 (Macintosh; Intel Mac OS X)" }
 
-def scrape_table_row(item)
+def scrape_table_row(item, firm_id, model_id)
   # print '.' 
   date = Date.strptime( item.css('td:nth-child(1) a').text , '%d-%m')
   link = item.css('td:nth-child(2) img').first.parent.attribute('href').value
   preview = item.css('td:nth-child(2) img').attribute('src').value
   model = item.css('td:nth-child(3)').text.strip.squeeze(' ')
 
-  brand = model.split(" ").first
+  if model_id && model_id != ''
+    brand = model.split(" ").first
+  else
+    brand = firm_id.capitalize
+  end
+       
   BRAND_LIST.any? do |word| 
     if model.include?(word)
       brand = word
@@ -152,7 +186,7 @@ def scrape_table_row(item)
 end
 
 # url = "http://auto.drom.ru/#{region}#{firm_id}/#{model_id[0]}#{page}/?go_search=2&minyear=#{min_year}&transmission=#{transmission_id}&order=year"
-url = "http://#{domain}/#{region}#{firm_id}/#{model_id[model_cnt]}#{page}/?go_search=2&minyear=#{min_year}&transmission=#{transmission_id}&privod=#{privod}&order=year"
+url = generate_url(region, firm_id, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
 loop do
   puts url
   session.visit url 
@@ -160,14 +194,14 @@ loop do
   # doc = Nokogiri::HTML(open(url))
   unless doc.css('.subscriptions_link_wrapper').empty?
     doc.css('.subscriptions_link_wrapper').first.parent.css('tr.row').each do |item|
-        current_car = scrape_table_row(item)
+        current_car = scrape_table_row(item, firm_id, model_id)
         # cars << current_car
         unless dataset.where(link: current_car[:link]).first
           dataset.insert(current_car)
         end
     end
     doc.css('.subscriptions_link_wrapper').first.parent.css('tr.h').each do |item|
-        current_car = scrape_table_row(item)
+        current_car = scrape_table_row(item, firm_id, model_id)
         # cars << current_car
         unless dataset.where(link: current_car[:link]).first
           dataset.insert(current_car)
@@ -181,7 +215,7 @@ loop do
     url = page
   elsif model_cnt < model_id.size - 1
     model_cnt += 1
-    url = "http://#{domain}/#{region}#{firm_id}/#{model_id[model_cnt]}#{page}/?go_search=2&minyear=#{min_year}&transmission=#{transmission_id}&privod=#{privod}&order=year"
+    url = generate_url(region, firm_id, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
   else
     break
   end
