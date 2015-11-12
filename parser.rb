@@ -20,6 +20,7 @@ unless DB.table_exists?(:cars)
     Date :date
     String :link
     String :preview
+    String :brand
     String :model
     Integer :year
     Integer :horsepower
@@ -38,6 +39,9 @@ unless DB.table_exists?(:cars)
     DateTime :updated_at
   end
 end
+# DB.add_column :cars, :brand, String
+# DB.add_column :items, :name, :text, :unique => true, :null => false
+# DB.add_column :items, :category, :text, :default => 'ruby'
 dataset = DB[:cars]
 
 
@@ -63,17 +67,36 @@ include Capybara::DSL
 domain = "auto.drom.ru"
 region = '' 
 # region = 'region54/'
-# firm_id = 'hyundai'
-# model_id = %w(coupe tiburon tuscani)
+firm_id = 'hyundai'
+model_id = %w(coupe tiburon tuscani)
 # model_id = %w(coupe)
-# min_year = 2008
-firm_id = 'toyota'
-model_id = %w(celica)
+min_year = 2008
+# firm_id = 'toyota'
+# model_id = %w(celica)
 transmission_id = 2 # autoamatic
 # privod = 2 # 1 - передний, 2 - задний, 3 - 4WD 
 privod ||= 0
 min_year ||= 0 
 page = ''
+
+BRAND_LIST = [
+  "Toyota", "Nissan", "Honda", "Mitsubishi", "Hyundai",
+  "--------------",
+  "Acura", "Alfa Romeo", "Alpina", "Aston Martin", "Audi", 
+  "BMW", "Brilliance", "Buick",  
+  "Cadillac", "Changan", "Chery", "Chevrolet", "Chrysler", "Citroen", 
+  "Dacia", "Daewoo", "Daihatsu", "Daimler", "Datsun", "Dodge", "Dongfeng", 
+  "FAW", "Fiat", "Ford", 
+  "Geely", "GMC", "Great Wall", 
+  "Hafei", "Haima", "Honda", "Hummer", "Hyundai", "Haval",
+  "Infiniti", "Isuzu", "Jaguar", "Jeep", "Kia", 
+  "Land Rover", "Lexus", "Lifan", "Lincoln", "Luxgen",
+  "Mazda", "Mercedes-Benz", "Mini", "Mitsubishi",
+  "Nissan", "Opel", "Peugeot", "Plymouth", "Pontiac", "Porsche", "Proton",
+  "Renault", "Rover", 
+  "Saab", "Saturn", "Scion", "SEAT", "Skoda", "Smart", "SsangYong", "Subaru", "Suzuki", 
+  "Tianye", "Toyota", "Volkswagen", "Volvo"
+]
 
 cars = []
 current_car = Hash.new
@@ -85,14 +108,21 @@ session = Capybara::Session.new(:poltergeist)
 session.driver.headers = { 'User-Agent' => "Mozilla/5.0 (Macintosh; Intel Mac OS X)" }
 
 def scrape_table_row(item)
-  print '.' 
-
+  # print '.' 
   date = Date.strptime( item.css('td:nth-child(1) a').text , '%d-%m')
   link = item.css('td:nth-child(2) img').first.parent.attribute('href').value
   preview = item.css('td:nth-child(2) img').attribute('src').value
   model = item.css('td:nth-child(3)').text.strip.squeeze(' ')
-  year = item.css('td:nth-child(4)').text.delete(' ').to_i
+
+  brand = model.split(" ").first
+  BRAND_LIST.any? do |word| 
+    if model.include?(word)
+      brand = word
+      model = model.sub(brand,'').strip
+    end
+  end
   
+  year = item.css('td:nth-child(4)').text.delete(' ').to_i
   hp = item.css('td:nth-child(5) .gray').text
   info = item.css('td:nth-child(5)').text.strip.squeeze(' ').sub(hp,'')
   volume = info.include?('л') ? info[0..4].to_f : 0.0
@@ -107,6 +137,7 @@ def scrape_table_row(item)
     link: link,
     preview: preview,
     model: model,
+    brand: brand,
     year: year,
     horsepower: hp.delete('(').to_i,
     engine_v: volume,
@@ -123,6 +154,7 @@ end
 # url = "http://auto.drom.ru/#{region}#{firm_id}/#{model_id[0]}#{page}/?go_search=2&minyear=#{min_year}&transmission=#{transmission_id}&order=year"
 url = "http://#{domain}/#{region}#{firm_id}/#{model_id[model_cnt]}#{page}/?go_search=2&minyear=#{min_year}&transmission=#{transmission_id}&privod=#{privod}&order=year"
 loop do
+  puts url
   session.visit url 
   doc = Nokogiri::HTML(session.html)
   # doc = Nokogiri::HTML(open(url))
@@ -145,7 +177,7 @@ loop do
   pager = doc.css('.pager')
   # binding.pry
   if pager && (pager.css('> a').text == "Следующая" || pager.css('> a:last').text == "Следующая" )
-    page = pager.css(' > a').attribute('href').value
+    page = pager.css(' > a:last').attribute('href').value
     url = page
   elsif model_cnt < model_id.size - 1
     model_cnt += 1
