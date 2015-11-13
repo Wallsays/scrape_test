@@ -39,7 +39,10 @@ unless DB.table_exists?(:cars)
     DateTime :updated_at
     String :phone
     Boolean :new_car
-    Boolean :photos
+    String :photos
+    String :seller_email
+    String :seller_link
+    String :seller_city
   end
 end
 # DB.add_column :cars, :brand, String
@@ -59,7 +62,7 @@ Capybara.run_server = false
 Capybara.register_driver :poltergeist do |app|
   Capybara::Poltergeist::Driver.new(app, 
     timeout: 60, 
-    js_errors: false,
+    # js_errors: false,
     phantomjs_options: [
       '--load-images=false', 
       # "--proxy-auth=#{proxy.username}:#{proxy.password}",
@@ -158,7 +161,7 @@ end
 # Start up a new thread
 session = Capybara::Session.new(:poltergeist)
 # Report using a particular user agent
-session.driver.headers = { 'User-Agent' => "Mozilla/5.0 (Macintosh; Intel Mac OS X)" }
+# session.driver.headers = { 'User-Agent' => "Mozilla/5.0 (Macintosh; Intel Mac OS X)" }
 
 def scrape_table_row(item, firm_id, model_id)
   # print '.' 
@@ -254,9 +257,19 @@ end
 dataset.where('updated_at < ?', Time.now - 3*60*60).each do |car| # 3 hours
   puts "#{car[:id]} : #{car[:link]}"
   session.visit car[:link]
-  # unless session.html.include?('Внимание! Автомобиль продан,')
-  #   session.click_button("Показать телефон")
-  # end
+  unless session.html.include?('Внимание! Автомобиль продан,')
+    if session.html.include?('Посмотреть карточку продавца')
+        if session.html.include?("Показать телефон")
+          # ('#show_contacts > span.b-button__text')
+          session.click_button("Показать телефон")
+        else
+          session.find('a[href$="mailto:"]').hover
+          sleep 2
+        end
+    else
+        session.click_button("Показать телефон")
+    end
+  end
   doc = Nokogiri::HTML(session.html)
   # binding.pry
   # doc = Nokogiri::HTML(open(car[:link]))
@@ -279,8 +292,32 @@ dataset.where('updated_at < ?', Time.now - 3*60*60).each do |car| # 3 hours
   details = unless item.parent.css('span:contains("Дополнительно")').empty?
     item.parent.css('span:contains("Дополнительно")').first.parent.text.sub('Дополнительно:', '').gsub(/\r?\n/, '<br>')
   end
-  phone = doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
   sold = doc.css('span.warning strong').text.include?("продан")
+  
+  seller_email = nil
+  seller_link  = nil
+  seller_city  = nil
+  phone = if session.html.include?('Посмотреть карточку продавца')
+    seller_email = unless doc.css('span:contains("E-mail")').empty?
+      doc.css('span:contains("E-mail")').first.next.next.next.css('a').first.text
+    end
+    seller_city = unless doc.css('span:contains("Город")').empty?
+      doc.css('span:contains("Город")').first.next_sibling.text.strip
+    end
+    seller_link = unless doc.css('a:contains("Посмотреть карточку продавца")').empty?
+      doc.css('a:contains("Посмотреть карточку продавца")').first.attribute('href').value
+    end
+    unless doc.css('span:contains("Телефон")').empty?
+      doc.css('span:contains("Телефон")').first.next_sibling.text.strip
+    else
+      unless doc.css('span:contains("Контакт")').empty?
+        doc.css('span:contains("Контакт")').first.next_sibling.text.strip
+      end
+    end
+  else
+    doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
+  end
+  # binding.pry
 
   photos = []
   doc.css('#usual_photos img').each do |img|
@@ -295,9 +332,12 @@ dataset.where('updated_at < ?', Time.now - 3*60*60).each do |car| # 3 hours
     new_car: new_car, 
     steer_wheel: steer_wheel, 
     details: details,
-    phone: phone,
     sold: sold,
     photos: photos.join(','),
+    phone: phone,
+    seller_email: seller_email,
+    seller_city:  seller_city,
+    seller_link:  seller_link,
     updated_at: DateTime.now
   )
 
