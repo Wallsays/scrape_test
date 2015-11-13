@@ -260,14 +260,18 @@ dataset.where('updated_at < ?', Time.now - 3*60*60).each do |car| # 3 hours
   unless session.html.include?('Внимание! Автомобиль продан,')
     if session.html.include?('Посмотреть карточку продавца')
         if session.html.include?("Показать телефон")
-          # ('#show_contacts > span.b-button__text')
           session.click_button("Показать телефон")
         else
-          session.find('a[href$="mailto:"]').hover
-          sleep 2
+          unless session.all('a[href$="mailto:"]').empty?
+            session.find('a[href$="mailto:"]').hover
+            sleep 2
+          end
         end
     else
+      # binding.pry
+      unless session.all('#show_contacts > span.b-button__text').empty?
         session.click_button("Показать телефон")
+      end
     end
   end
   doc = Nokogiri::HTML(session.html)
@@ -312,12 +316,19 @@ dataset.where('updated_at < ?', Time.now - 3*60*60).each do |car| # 3 hours
     else
       unless doc.css('span:contains("Контакт")').empty?
         doc.css('span:contains("Контакт")').first.next_sibling.text.strip
+      else
+        doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
       end
     end
   else
     doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
   end
-  # binding.pry
+  
+  # if session.html.include?('Посмотреть карточку продавца') && !sold && (phone.nil? || phone.empty?)
+  #   puts phone
+  #   puts seller_email
+  #   binding.pry
+  # end
 
   photos = []
   doc.css('#usual_photos img').each do |img|
