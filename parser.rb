@@ -39,6 +39,7 @@ unless DB.table_exists?(:cars)
     DateTime :updated_at
     String :phone
     Boolean :new_car
+    Boolean :photos
   end
 end
 # DB.add_column :cars, :brand, String
@@ -281,10 +282,11 @@ dataset.where('updated_at < ?', Time.now - 3*60*60).each do |car| # 3 hours
   phone = doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
   sold = doc.css('span.warning strong').text.include?("продан")
 
-  # car[:photos] = []
-  # doc.css('#usual_photos img').each do |img|
-  #   car[:photos] << img.attribute('src').value
-  # end
+  photos = []
+  doc.css('#usual_photos img').each do |img|
+    photos << img.attribute('src').value
+  end
+
   car = dataset.filter(id: car[:id])
   car.update(
     petrol: petrol, 
@@ -295,6 +297,7 @@ dataset.where('updated_at < ?', Time.now - 3*60*60).each do |car| # 3 hours
     details: details,
     phone: phone,
     sold: sold,
+    photos: photos.join(','),
     updated_at: DateTime.now
   )
 
