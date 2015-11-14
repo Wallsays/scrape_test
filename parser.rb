@@ -10,6 +10,12 @@ require 'ap'
 # require 'pg'
 require "sequel"
 
+rub_table_search = false
+rub_details_scrape = false
+ARGV.each do|a|
+  rub_table_search = true if a.to_i == 1
+  rub_details_scrape = true if a.to_i == 2
+end
 
 # DB = Sequel.connect('postgres://user:password@host:port/database_name')
 DB = Sequel.connect('postgres://localhost/cars')
@@ -43,10 +49,11 @@ unless DB.table_exists?(:cars)
     String :seller_email
     String :seller_link
     String :seller_city
+    Boolean :souce_removed
   end
 end
 # DB.add_column :cars, :brand, String
-# DB.add_column :cars, :new_car, :boolean
+# DB.add_column :cars, :souce_removed, :boolean
 # DB.add_column :cars, :phone, :string
 # DB.add_column :items, :name, :text, :unique => true, :null => false
 # DB.add_column :items, :category, :text, :default => 'ruby'
@@ -88,6 +95,15 @@ firm_id = 'mercedes-benz'
 firm_id = 'chevrolet'
 firm_id = 'hyundai'
 firm_id = 'kia'
+# firms = {
+#   toyota: [], 
+#   mazda: [], 
+#   nissan: [], 
+#   honda: [], 
+#   mitsubishi: [], 
+#   volkswagen: [], 
+#   hyundai: []
+# }
 # model_id = %w(coupe tiburon tuscani)
 # model_id = %w(coupe)
 # model_id = %w(celica)
@@ -212,7 +228,7 @@ def scrape_table_row(item, firm_id, model_id)
   }
 end
 
-if false
+if rub_table_search
   url = generate_url(region, firm_id, firm_cnt, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
   loop do
     puts url
@@ -254,107 +270,116 @@ end
 # off = 400
 # dataset.offset(off).each do |car|
 # dataset.filter('id > 1749').each do |car|
-dataset.where('updated_at < ?', Time.now - 3*60*60).each do |car| # 3 hours
-  puts "#{car[:id]} : #{car[:link]}"
-  session.visit car[:link]
-  unless session.html.include?('Внимание! Автомобиль продан,')
-    if session.html.include?('Посмотреть карточку продавца')
-        if session.html.include?("Показать телефон")
-          session.click_button("Показать телефон")
-        else
-          unless session.all('a[href$="mailto:"]').empty?
-            session.find('a[href$="mailto:"]').hover
-            sleep 2
+if rub_details_scrape
+  # dataset.where('updated_at < ? AND sold = false', Time.now - 24*60*60).each do |car| # 24 hours
+  dataset.where('updated_at < ?', Time.now - 12*60*60).each do |car| # 24 hours
+    puts "#{car[:id]} : #{car[:link]}"
+    session.visit car[:link]
+    unless session.html.include?('Внимание! Автомобиль продан,')
+      if session.html.include?('Посмотреть карточку продавца')
+          if session.html.include?("Показать телефон")
+            session.click_button("Показать телефон")
+          else
+            unless session.all('a[href$="mailto:"]').empty?
+              session.find('a[href$="mailto:"]').hover
+              sleep 2
+            end
           end
+      else
+        # binding.pry
+        unless session.all('#show_contacts > span.b-button__text').empty?
+          session.click_button("Показать телефон")
         end
-    else
-      # binding.pry
-      unless session.all('#show_contacts > span.b-button__text').empty?
-        session.click_button("Показать телефон")
       end
     end
-  end
-  doc = Nokogiri::HTML(session.html)
-  # binding.pry
-  # doc = Nokogiri::HTML(open(car[:link]))
-  item = doc.css('.adv-text .b-media-cont.b-media-cont_relative').first
-  petrol = unless item.css('span:contains("Двигатель")').empty?
-    item.css('span:contains("Двигатель")').first.next_sibling.text.strip.split(",")[0]
-  end
-  color = unless item.css('span:contains("Цвет")').empty?
-    item.css('span:contains("Цвет")').first.next_sibling.text.strip
-  end
-  kms = unless item.css('span:contains("Пробег, км")').empty?
-    item.css('span:contains("Пробег, км")').first.next_sibling.text.strip.to_i
-  end
-  new_car = unless item.css('span:contains("Пробег")').empty?
-    item.css('span:contains("Пробег")').first.next_sibling.text.include?("Новый")
-  end
-  steer_wheel = unless item.css('span:contains("Руль")').empty?
-    item.css('span:contains("Руль")').first.next_sibling.text.strip
-  end
-  details = unless item.parent.css('span:contains("Дополнительно")').empty?
-    item.parent.css('span:contains("Дополнительно")').first.parent.text.sub('Дополнительно:', '').gsub(/\r?\n/, '<br>')
-  end
-  sold = doc.css('span.warning strong').text.include?("продан")
-  
-  seller_email = nil
-  seller_link  = nil
-  seller_city  = nil
-  phone = if session.html.include?('Посмотреть карточку продавца')
-    seller_email = unless doc.css('span:contains("E-mail")').empty?
-      doc.css('span:contains("E-mail")').first.next.next.next.css('a').first.text
-    end
-    seller_city = unless doc.css('span:contains("Город")').empty?
-      doc.css('span:contains("Город")').first.next_sibling.text.strip
-    end
-    seller_link = unless doc.css('a:contains("Посмотреть карточку продавца")').empty?
-      doc.css('a:contains("Посмотреть карточку продавца")').first.attribute('href').value
-    end
-    unless doc.css('span:contains("Телефон")').empty?
-      doc.css('span:contains("Телефон")').first.next_sibling.text.strip
-    else
-      unless doc.css('span:contains("Контакт")').empty?
-        doc.css('span:contains("Контакт")').first.next_sibling.text.strip
+    doc = Nokogiri::HTML(session.html)
+    # binding.pry
+    # doc = Nokogiri::HTML(open(car[:link]))
+    item = doc.css('.adv-text .b-media-cont.b-media-cont_relative').first
+    if item
+      petrol = unless item.css('span:contains("Двигатель")').empty?
+        item.css('span:contains("Двигатель")').first.next_sibling.text.strip.split(",")[0]
+      end
+      color = unless item.css('span:contains("Цвет")').empty?
+        item.css('span:contains("Цвет")').first.next_sibling.text.strip
+      end
+      kms = unless item.css('span:contains("Пробег, км")').empty?
+        item.css('span:contains("Пробег, км")').first.next_sibling.text.strip.to_i
+      end
+      new_car = unless item.css('span:contains("Пробег")').empty?
+        item.css('span:contains("Пробег")').first.next_sibling.text.include?("Новый")
+      end
+      steer_wheel = unless item.css('span:contains("Руль")').empty?
+        item.css('span:contains("Руль")').first.next_sibling.text.strip
+      end
+      details = unless item.parent.css('span:contains("Дополнительно")').empty?
+        item.parent.css('span:contains("Дополнительно")').first.parent.text.sub('Дополнительно:', '').gsub(/\r?\n/, '<br>')
+      end
+      sold = doc.css('span.warning strong').text.include?("продан")
+      
+      seller_email = nil
+      seller_link  = nil
+      seller_city  = nil
+      phone = if session.html.include?('Посмотреть карточку продавца')
+        seller_email = unless doc.css('span:contains("E-mail")').empty?
+          doc.css('span:contains("E-mail")').first.next.next.next.css('a').first.text
+        end
+        seller_city = unless doc.css('span:contains("Город")').empty?
+          doc.css('span:contains("Город")').first.next_sibling.text.strip
+        end
+        seller_link = unless doc.css('a:contains("Посмотреть карточку продавца")').empty?
+          doc.css('a:contains("Посмотреть карточку продавца")').first.attribute('href').value
+        end
+        unless doc.css('span:contains("Телефон")').empty?
+          doc.css('span:contains("Телефон")').first.next_sibling.text.strip
+        else
+          unless doc.css('span:contains("Контакт")').empty?
+            doc.css('span:contains("Контакт")').first.next_sibling.text.strip
+          else
+            doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
+          end
+        end
       else
         doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
       end
+      
+      # if session.html.include?('Посмотреть карточку продавца') && !sold && (phone.nil? || phone.empty?)
+      #   puts phone
+      #   puts seller_email
+      #   binding.pry
+      # end
+
+      photos = []
+      doc.css('#usual_photos img').each do |img|
+        photos << img.attribute('src').value
+      end
+
+      car = dataset.filter(id: car[:id])
+      car.update(
+        petrol: petrol, 
+        color: color, 
+        kms: kms, 
+        new_car: new_car, 
+        steer_wheel: steer_wheel, 
+        details: details,
+        sold: sold,
+        photos: photos.join(','),
+        phone: phone,
+        seller_email: seller_email,
+        seller_city:  seller_city,
+        seller_link:  seller_link,
+        updated_at: DateTime.now
+      )
+
+      # binding.pry
+    else
+      car = dataset.filter(id: car[:id])
+      car.update(
+        souce_removed: true
+      )
     end
-  else
-    doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
   end
-  
-  # if session.html.include?('Посмотреть карточку продавца') && !sold && (phone.nil? || phone.empty?)
-  #   puts phone
-  #   puts seller_email
-  #   binding.pry
-  # end
-
-  photos = []
-  doc.css('#usual_photos img').each do |img|
-    photos << img.attribute('src').value
-  end
-
-  car = dataset.filter(id: car[:id])
-  car.update(
-    petrol: petrol, 
-    color: color, 
-    kms: kms, 
-    new_car: new_car, 
-    steer_wheel: steer_wheel, 
-    details: details,
-    sold: sold,
-    photos: photos.join(','),
-    phone: phone,
-    seller_email: seller_email,
-    seller_city:  seller_city,
-    seller_link:  seller_link,
-    updated_at: DateTime.now
-  )
-
-  # binding.pry
 end
-
 # binding.pry
 
 puts dataset.count
