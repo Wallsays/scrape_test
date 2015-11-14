@@ -68,7 +68,7 @@ Capybara.run_server = false
 # Register PhantomJS (aka poltergeist) as the driver to use
 Capybara.register_driver :poltergeist do |app|
   Capybara::Poltergeist::Driver.new(app, 
-    timeout: 60, 
+    timeout: 120, 
     # js_errors: false,
     phantomjs_options: [
       '--load-images=false', 
@@ -95,15 +95,19 @@ firm_id = 'mercedes-benz'
 firm_id = 'chevrolet'
 firm_id = 'hyundai'
 firm_id = 'kia'
-# firms = {
-#   toyota: [], 
-#   mazda: [], 
-#   nissan: [], 
-#   honda: [], 
-#   mitsubishi: [], 
-#   volkswagen: [], 
-#   hyundai: []
-# }
+firms = {
+  'toyota' => [], 
+  'honda' => [], 
+  'mitsubishi' => [], 
+  'volkswagen' => [], 
+  'hyundai' => ["coupe", "tiburon", "tuscani"],
+  'kia' => [],
+  'ford' => [],
+  'chevrolet' => [],
+  'mercedes-benz'=> [],
+  'mazda' => [], 
+  'nissan' => []
+}
 # model_id = %w(coupe tiburon tuscani)
 # model_id = %w(coupe)
 # model_id = %w(celica)
@@ -143,7 +147,7 @@ current_car = Hash.new
 firm_cnt = 0
 model_cnt = 0
 
-def generate_url(region, firm_id, firm_cnt, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
+def generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
   # all cities
   # http://auto.drom.ru/hyundai/coupe/?minyear=2007&transmission=2&order=year&go_search=2
   # Nsk reg
@@ -165,7 +169,7 @@ def generate_url(region, firm_id, firm_cnt, model_id, model_cnt, min_year, minpr
     firm_id + '/'
   end
 
-  url += if model_id
+  url += if model_id && !model_id.empty?
     model_id[model_cnt] + '/'
   else
     ''
@@ -179,7 +183,7 @@ session = Capybara::Session.new(:poltergeist)
 # Report using a particular user agent
 # session.driver.headers = { 'User-Agent' => "Mozilla/5.0 (Macintosh; Intel Mac OS X)" }
 
-def scrape_table_row(item, firm_id, model_id)
+def scrape_table_row(item, firms, firm_id, model_id)
   # print '.' 
   date = Date.strptime( item.css('td:nth-child(1) a').text , '%d-%m')
   link = item.css('td:nth-child(2) img').first.parent.attribute('href').value
@@ -189,7 +193,7 @@ def scrape_table_row(item, firm_id, model_id)
   if model_id && model_id != ''
     brand = model.split(" ").first
   else
-    brand = firm_id.capitalize
+    model_id = firm_id.capitalize
   end
        
   BRAND_LIST.any? do |word| 
@@ -229,38 +233,47 @@ def scrape_table_row(item, firm_id, model_id)
 end
 
 if rub_table_search
-  url = generate_url(region, firm_id, firm_cnt, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
-  loop do
-    puts url
-    session.visit url 
-    doc = Nokogiri::HTML(session.html)
-    # doc = Nokogiri::HTML(open(url))
-    unless doc.css('.subscriptions_link_wrapper').empty?
-      doc.css('.subscriptions_link_wrapper').first.parent.css('tr.row').each do |item|
-          current_car = scrape_table_row(item, firm_id, model_id)
-          # cars << current_car
-          unless dataset.where(link: current_car[:link]).first
-            dataset.insert(current_car)
-          end
+  firms.each do |firm, models|
+    firm_id = firm
+    model_cnt = 0
+    model_id = models #[model_cnt]
+    url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
+    loop do
+      cnt = 0
+      puts url
+      session.visit url 
+      doc = Nokogiri::HTML(session.html)
+      # doc = Nokogiri::HTML(open(url))
+      unless doc.css('.subscriptions_link_wrapper').empty?
+        doc.css('.subscriptions_link_wrapper').first.parent.css('tr.row').each do |item|
+            current_car = scrape_table_row(item, firms, firm_id, model_id)
+            # cars << current_car
+            unless dataset.where(link: current_car[:link]).first
+              dataset.insert(current_car)
+              cnt += 1
+            end
+        end
+        doc.css('.subscriptions_link_wrapper').first.parent.css('tr.h').each do |item|
+            current_car = scrape_table_row(item, firms, firm_id, model_id)
+            # cars << current_car
+            unless dataset.where(link: current_car[:link]).first
+              dataset.insert(current_car)
+              cnt += 1
+            end
+        end
       end
-      doc.css('.subscriptions_link_wrapper').first.parent.css('tr.h').each do |item|
-          current_car = scrape_table_row(item, firm_id, model_id)
-          # cars << current_car
-          unless dataset.where(link: current_car[:link]).first
-            dataset.insert(current_car)
-          end
+      print " : #{cnt}"
+      pager = doc.css('.pager')
+      # binding.pry
+      if pager && (pager.css('> a').text == "Следующая" || pager.css('> a:last').text == "Следующая" )
+        page = pager.css(' > a:last').attribute('href').value
+        url = page
+      elsif model_id && model_cnt < ((model_id.size) - 1)
+        model_cnt += 1
+        url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
+      else
+        break
       end
-    end
-    pager = doc.css('.pager')
-    # binding.pry
-    if pager && (pager.css('> a').text == "Следующая" || pager.css('> a:last').text == "Следующая" )
-      page = pager.css(' > a:last').attribute('href').value
-      url = page
-    elsif model_id && model_cnt < ((model_id.size) - 1)
-      model_cnt += 1
-      url = generate_url(region, firm_id, firm_cnt, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
-    else
-      break
     end
   end
 end
