@@ -50,10 +50,12 @@ unless DB.table_exists?(:cars)
     String :seller_link
     String :seller_city
     Boolean :source_removed, default: false
+    Boolean :no_docs, default: false
+    Boolean :broken, default: false
   end
 end
 # DB.add_column :cars, :brand, String
-# DB.add_column :cars, :souce_removed, :boolean
+# DB.add_column :cars, :broken, :boolean, :default => false
 # DB.add_column :cars, :phone, :string
 # DB.add_column :items, :name, :text, :unique => true, :null => false
 # DB.add_column :items, :category, :text, :default => 'ruby'
@@ -115,7 +117,7 @@ firms = {
 }
 min_year = 2000
 max_year = 2015
-minprice = 300000
+minprice = 200000
 maxprice = 1000000
 # transmission_id = 2 # autoamatic
 # privod = 2 # 1 - передний, 2 - задний, 3 - 4WD 
@@ -242,6 +244,17 @@ def scrape_table_row(item, firms, firm_id, model_id)
   wir_dr = info.include?("4WD") ? "4WD" : info.include?("передний") ? "передний" : info.include?("задний") ? "задний" : ""
 
   kms = item.css('td:nth-child(6)').text.delete(' ').to_i
+
+  no_docs = false
+  broken = false
+  extra = item.css('td:nth-child(7) img')
+  unless extra.empty?
+    extra.each do |img|
+      no_docs = true if img.attribute('title').value == "Без документов"
+      broken  = true if img.attribute('title').value == "Битый или не на ходу"
+    end
+  end
+
   cost = item.css('td:nth-child(8) .f14').text.delete(' ').to_i
   city = item.css('td:nth-child(8) span:last').text.delete(' ')
   current_car = {
@@ -259,6 +272,8 @@ def scrape_table_row(item, firms, firm_id, model_id)
     cost: cost,
     city: city,
     sold: sold,
+    no_docs: no_docs,
+    broken: broken,
     created_at: DateTime.now,
     updated_at: DateTime.now
   }
@@ -270,53 +285,55 @@ if rub_table_search
     model_cnt = 0
     model_id = models #[model_cnt]
 
-    # beg_year = min_year
-    # end_year = max_year
-    # (beg_year..end_year).step(2) do |year|
-    #   min_year = year
-    #   max_year = year + 2
-    # end
-
-    url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
-    loop do
-      cnt = 0
-      print url
-      session = Capybara::Session.new(:poltergeist)
-      session.visit url 
-      doc = Nokogiri::HTML(session.html)
-      # doc = Nokogiri::HTML(open(url))
-      unless doc.css('.subscriptions_link_wrapper').empty?
-        doc.css('.subscriptions_link_wrapper').first.parent.css('tr.row').each do |item|
-            current_car = scrape_table_row(item, firms, firm_id, model_id)
-            # cars << current_car
-            unless dataset.where(link: current_car[:link]).first
-              dataset.insert(current_car)
-              cnt += 1
-            end
+    beg_year = min_year
+    end_year = max_year
+    year_step = 4 
+    (beg_year..end_year).step( year_step ) do |year|
+      min_year = year
+      max_year = year + year_step
+      max_year = Date.today.year if max_year > Date.today.year
+      url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
+      loop do
+        cnt = 0
+        print url
+        session = Capybara::Session.new(:poltergeist)
+        session.visit url 
+        doc = Nokogiri::HTML(session.html)
+        # doc = Nokogiri::HTML(open(url))
+        unless doc.css('.subscriptions_link_wrapper').empty?
+          doc.css('.subscriptions_link_wrapper').first.parent.css('tr.row').each do |item|
+              current_car = scrape_table_row(item, firms, firm_id, model_id)
+              # cars << current_car
+              unless dataset.where(link: current_car[:link]).first
+                dataset.insert(current_car)
+                cnt += 1
+              end
+          end
+          doc.css('.subscriptions_link_wrapper').first.parent.css('tr.h').each do |item|
+              current_car = scrape_table_row(item, firms, firm_id, model_id)
+              # cars << current_car
+              unless dataset.where(link: current_car[:link]).first
+                dataset.insert(current_car)
+                cnt += 1
+              end
+          end
         end
-        doc.css('.subscriptions_link_wrapper').first.parent.css('tr.h').each do |item|
-            current_car = scrape_table_row(item, firms, firm_id, model_id)
-            # cars << current_car
-            unless dataset.where(link: current_car[:link]).first
-              dataset.insert(current_car)
-              cnt += 1
-            end
+        print " : #{cnt}\n"
+        pager = doc.css('.pager')
+        # binding.pry
+        if pager && (pager.css('> a').text == "Следующая" || pager.css('> a:last').text == "Следующая" )
+          page = pager.css(' > a:last').attribute('href').value
+          url = page
+        elsif model_id && model_cnt < ((model_id.size) - 1)
+          model_cnt += 1
+          url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
+        else
+          break
         end
+        session.driver.quit
       end
-      print " : #{cnt}\n"
-      pager = doc.css('.pager')
-      # binding.pry
-      if pager && (pager.css('> a').text == "Следующая" || pager.css('> a:last').text == "Следующая" )
-        page = pager.css(' > a:last').attribute('href').value
-        url = page
-      elsif model_id && model_cnt < ((model_id.size) - 1)
-        model_cnt += 1
-        url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
-      else
-        break
-      end
-      session.driver.quit
     end
+
   end
 end
 
@@ -327,8 +344,8 @@ end
 # dataset.filter('id > 1749').each do |car|
 if rub_details_scrape
   # dataset.where('updated_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60).each do |car|
-  dataset.where('created_at < ? AND updated_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60).each do |car|
-  # dataset.where('id > 14810 AND sold = false AND source_removed = false').each do |car|
+  # dataset.where('created_at < ? AND updated_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60).each do |car|
+  dataset.where('id > 14810 AND sold = false AND source_removed = false').each do |car|
     puts "#{car[:id]} : #{car[:link]}"
     session = Capybara::Session.new(:poltergeist)
     session.visit car[:link]
