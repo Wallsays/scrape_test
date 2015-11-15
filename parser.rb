@@ -210,7 +210,7 @@ def generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year
 end
 
 # Start up a new thread
-session = Capybara::Session.new(:poltergeist)
+# session = Capybara::Session.new(:poltergeist)
 # Report using a particular user agent
 # session.driver.headers = { 'User-Agent' => "Mozilla/5.0 (Macintosh; Intel Mac OS X)" }
 
@@ -281,6 +281,7 @@ if rub_table_search
     loop do
       cnt = 0
       print url
+      session = Capybara::Session.new(:poltergeist)
       session.visit url 
       doc = Nokogiri::HTML(session.html)
       # doc = Nokogiri::HTML(open(url))
@@ -314,6 +315,7 @@ if rub_table_search
       else
         break
       end
+      session.driver.quit
     end
   end
 end
@@ -324,9 +326,11 @@ end
 # dataset.offset(off).each do |car|
 # dataset.filter('id > 1749').each do |car|
 if rub_details_scrape
-  # dataset.where('updated_at < ? AND sold = false', Time.now - 12*60*60).each do |car| # 12 hours
-  dataset.where('updated_at < ? AND sold = false AND source_removed = false', Time.now - 24*60*60).each do |car| # 24 hours
+  # dataset.where('updated_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60).each do |car|
+  dataset.where('created_at < ? AND updated_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60).each do |car|
+  # dataset.where('id > 14810 AND sold = false AND source_removed = false').each do |car|
     puts "#{car[:id]} : #{car[:link]}"
+    session = Capybara::Session.new(:poltergeist)
     session.visit car[:link]
     unless session.html.include?('Внимание! Автомобиль продан,')
       if session.html.include?('Посмотреть карточку продавца')
@@ -435,6 +439,7 @@ if rub_details_scrape
         source_removed: true
       )
     end
+    session.driver.quit
   end
 end
 # binding.pry
