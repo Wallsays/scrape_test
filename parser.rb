@@ -269,6 +269,14 @@ if rub_table_search
     firm_id = firm
     model_cnt = 0
     model_id = models #[model_cnt]
+
+    # beg_year = min_year
+    # end_year = max_year
+    # (beg_year..end_year).step(2) do |year|
+    #   min_year = year
+    #   max_year = year + 2
+    # end
+
     url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
     loop do
       cnt = 0
@@ -317,7 +325,7 @@ end
 # dataset.filter('id > 1749').each do |car|
 if rub_details_scrape
   # dataset.where('updated_at < ? AND sold = false', Time.now - 12*60*60).each do |car| # 12 hours
-  dataset.where('updated_at < ? AND sold = false', Time.now - 24*60*60).each do |car| # 24 hours
+  dataset.where('updated_at < ? AND sold = false AND source_removed = false', Time.now - 24*60*60).each do |car| # 24 hours
     puts "#{car[:id]} : #{car[:link]}"
     session.visit car[:link]
     unless session.html.include?('Внимание! Автомобиль продан,')
@@ -395,8 +403,12 @@ if rub_details_scrape
       # end
 
       photos = []
-      doc.css('#usual_photos img').each do |img|
-        photos << img.attribute('src').value
+      doc.css('#usual_photos a').each do |link|
+        next if link.css('img').empty?
+        pic = []
+        pic[0] = link.attribute('href').value
+        pic[1] = link.css('img').first.attribute('src').value
+        photos << pic
       end
 
       car = dataset.filter(id: car[:id])
