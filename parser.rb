@@ -280,57 +280,65 @@ def scrape_table_row(item, firms, firm_id, model_id)
 end
 
 if rub_table_search
+  beg_year = min_year
+  end_year = max_year
+  year_step = 2
+  beg_price = minprice
+  end_price = maxprice
+  price_step = 200000 # 200 k
   firms.each do |firm, models|
     firm_id = firm
     model_cnt = 0
     model_id = models #[model_cnt]
 
-    beg_year = min_year
-    end_year = max_year
-    year_step = 4 
-    (beg_year..end_year).step( year_step ) do |year|
-      min_year = year
-      max_year = year + year_step
-      max_year = Date.today.year if max_year > Date.today.year
-      url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
-      loop do
-        cnt = 0
-        print url
-        session = Capybara::Session.new(:poltergeist)
-        session.visit url 
-        doc = Nokogiri::HTML(session.html)
-        # doc = Nokogiri::HTML(open(url))
-        unless doc.css('.subscriptions_link_wrapper').empty?
-          doc.css('.subscriptions_link_wrapper').first.parent.css('tr.row').each do |item|
-              current_car = scrape_table_row(item, firms, firm_id, model_id)
-              # cars << current_car
-              unless dataset.where(link: current_car[:link]).first
-                dataset.insert(current_car)
-                cnt += 1
-              end
+    (beg_price..end_price).step( price_step ) do |price|
+      minprice = price
+      maxprice = price + price_step
+      maxprice = end_price if maxprice > end_price
+      (beg_year..end_year).step( year_step ) do |year|
+        min_year = year
+        max_year = year + year_step
+        max_year = Date.today.year if max_year > Date.today.year
+        url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
+        loop do
+          cnt = 0
+          print url
+          session = Capybara::Session.new(:poltergeist)
+          session.visit url 
+          doc = Nokogiri::HTML(session.html)
+          # doc = Nokogiri::HTML(open(url))
+          unless doc.css('.subscriptions_link_wrapper').empty?
+            doc.css('.subscriptions_link_wrapper').first.parent.css('tr.row').each do |item|
+                current_car = scrape_table_row(item, firms, firm_id, model_id)
+                # cars << current_car
+                unless dataset.where(link: current_car[:link]).first
+                  dataset.insert(current_car)
+                  cnt += 1
+                end
+            end
+            doc.css('.subscriptions_link_wrapper').first.parent.css('tr.h').each do |item|
+                current_car = scrape_table_row(item, firms, firm_id, model_id)
+                # cars << current_car
+                unless dataset.where(link: current_car[:link]).first
+                  dataset.insert(current_car)
+                  cnt += 1
+                end
+            end
           end
-          doc.css('.subscriptions_link_wrapper').first.parent.css('tr.h').each do |item|
-              current_car = scrape_table_row(item, firms, firm_id, model_id)
-              # cars << current_car
-              unless dataset.where(link: current_car[:link]).first
-                dataset.insert(current_car)
-                cnt += 1
-              end
+          print " : #{cnt}\n"
+          pager = doc.css('.pager')
+          # binding.pry
+          if pager && (pager.css('> a').text == "Следующая" || pager.css('> a:last').text == "Следующая" )
+            page = pager.css(' > a:last').attribute('href').value
+            url = page
+          elsif model_id && model_cnt < ((model_id.size) - 1)
+            model_cnt += 1
+            url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
+          else
+            break
           end
+          session.driver.quit
         end
-        print " : #{cnt}\n"
-        pager = doc.css('.pager')
-        # binding.pry
-        if pager && (pager.css('> a').text == "Следующая" || pager.css('> a:last').text == "Следующая" )
-          page = pager.css(' > a:last').attribute('href').value
-          url = page
-        elsif model_id && model_cnt < ((model_id.size) - 1)
-          model_cnt += 1
-          url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
-        else
-          break
-        end
-        session.driver.quit
       end
     end
 
@@ -345,7 +353,10 @@ end
 if rub_details_scrape
   # dataset.where('updated_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60).each do |car|
   # dataset.where('created_at < ? AND updated_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60).each do |car|
-  dataset.where('id > 14810 AND sold = false AND source_removed = false').each do |car|
+  # dataset.where('id > 15461 AND sold = false AND source_removed = false').each do |car|
+  # dataset.where('created_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60 ).reverse_order(:created_at).each do |car|
+  dataset.where('sold = false AND source_removed = false').where(photos:nil).reverse_order(:created_at).each do |car|
+    # next if car[:created_at] != car[:updated_at]
     puts "#{car[:id]} : #{car[:link]}"
     session = Capybara::Session.new(:poltergeist)
     session.visit car[:link]
@@ -388,6 +399,12 @@ if rub_details_scrape
       end
       details = unless item.parent.css('span:contains("Дополнительно")').empty?
         item.parent.css('span:contains("Дополнительно")').first.parent.text.sub('Дополнительно:', '').gsub(/\r?\n/, '<br>')
+      end
+      no_docs = unless item.parent.css('span:contains("Особые отметки")').empty?
+        item.parent.css('span:contains("Особые отметки")').first.next_sibling.text.strip.include?("без документов")
+      end
+      broken = unless item.parent.css('span:contains("Особые отметки")').empty?
+        item.parent.css('span:contains("Особые отметки")').first.next_sibling.text.strip.include?("битый или не на ходу")
       end
       sold = doc.css('span.warning strong').text.include?("продан")
       
@@ -446,6 +463,8 @@ if rub_details_scrape
         seller_email: seller_email,
         seller_city:  seller_city,
         seller_link:  seller_link,
+        no_docs: no_docs,
+        broken:  broken,
         updated_at: DateTime.now
       )
 
