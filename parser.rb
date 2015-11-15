@@ -40,16 +40,16 @@ unless DB.table_exists?(:cars)
     String :steer_wheel
     String :color
     String :petrol
-    Boolean :sold
+    Boolean :sold, default: false
     DateTime :created_at
     DateTime :updated_at
     String :phone
-    Boolean :new_car
+    Boolean :new_car, default: false
     String :photos
     String :seller_email
     String :seller_link
     String :seller_city
-    Boolean :souce_removed
+    Boolean :source_removed, default: false
   end
 end
 # DB.add_column :cars, :brand, String
@@ -57,6 +57,8 @@ end
 # DB.add_column :cars, :phone, :string
 # DB.add_column :items, :name, :text, :unique => true, :null => false
 # DB.add_column :items, :category, :text, :default => 'ruby'
+# DB[:cars].where(source_removed:nil).update(source_removed:false)
+# DB.set_column_default :cars, :source_removed, false
 dataset = DB[:cars]
 # dataset.filter(year: 2009).map(:id) => [16, 26, 29]
 # dataset.filter(id: 8277).delete
@@ -84,43 +86,46 @@ domain = "auto.drom.ru"
 # city = '' 
 # region = '' 
 region = 'region54'
-# firm_id = 'toyota'
-# firm_id = 'mazda'
-firm_id = 'honda'
-firm_id = 'nissan'
-firm_id = 'mitsubishi'
-firm_id = 'ford'
-firm_id = 'volkswagen'
-firm_id = 'mercedes-benz'
-firm_id = 'chevrolet'
-firm_id = 'hyundai'
-firm_id = 'kia'
 firms = {
   'toyota' => [], 
+  'mazda' => [], 
+  'nissan' => [],
   'honda' => [], 
   'mitsubishi' => [], 
   'volkswagen' => [], 
-  'hyundai' => ["coupe", "tiburon", "tuscani"],
+  'lexus' => [],
+  'subaru' => [],
+  'suzuki' => [],
+  'infiniti' => [],
+  # 'hyundai' => ["coupe", "tiburon", "tuscani"],
+  'hyundai' => [],
   'kia' => [],
-  'ford' => [],
   'chevrolet' => [],
+  'ford' => [],
   'mercedes-benz'=> [],
-  'mazda' => [], 
-  'nissan' => []
+  'bmw' => [],
+  'audi' => [],
+  'renault' => [],
+  'skoda' => [],
+  'opel' => [],
+  'peugeot' => [],
+  'land_rover' => [],
+  'ssang_yong' => [],
+  'citroen' => []
 }
-# model_id = %w(coupe tiburon tuscani)
-# model_id = %w(coupe)
-# model_id = %w(celica)
 min_year = 2000
-transmission_id = 2 # autoamatic
+max_year = 2015
 minprice = 300000
 maxprice = 1000000
+# transmission_id = 2 # autoamatic
 # privod = 2 # 1 - передний, 2 - задний, 3 - 4WD 
 model_id ||= nil
+transmission_id ||= 0 
 minprice ||= 0
 maxprice ||= 0
 privod ||= 0
 min_year ||= 0 
+max_year ||= 0 
 page = ''
 
 BRAND_LIST = [
@@ -147,7 +152,7 @@ current_car = Hash.new
 firm_cnt = 0
 model_cnt = 0
 
-def generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
+def generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
   # all cities
   # http://auto.drom.ru/hyundai/coupe/?minyear=2007&transmission=2&order=year&go_search=2
   # Nsk reg
@@ -175,7 +180,33 @@ def generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year
     ''
   end
 
-  url += "?go_search=2&minyear=#{min_year}&minprice=#{minprice}&maxprice=#{maxprice}&transmission=#{transmission_id}&privod=#{privod}&order=year"
+  url += "?go_search=2"
+
+  url += if min_year
+    "&minyear=#{min_year}"
+  end
+
+  url += if max_year
+    "&maxyear=#{max_year}"
+  end
+
+  url += if minprice
+    "&minprice=#{minprice}"
+  end
+
+  url += if maxprice
+    "&maxprice=#{maxprice}"
+  end
+
+  url += if transmission_id
+    "&transmission=#{transmission_id}"
+  end
+
+  url += if privod
+    "&privod=#{privod}"
+  end
+
+  url += "&order=year"
 end
 
 # Start up a new thread
@@ -184,25 +215,25 @@ session = Capybara::Session.new(:poltergeist)
 # session.driver.headers = { 'User-Agent' => "Mozilla/5.0 (Macintosh; Intel Mac OS X)" }
 
 def scrape_table_row(item, firms, firm_id, model_id)
-  # print '.' 
   date = Date.strptime( item.css('td:nth-child(1) a').text , '%d-%m')
   link = item.css('td:nth-child(2) img').first.parent.attribute('href').value
   preview = item.css('td:nth-child(2) img').attribute('src').value
   model = item.css('td:nth-child(3)').text.strip.squeeze(' ')
+  sold = item.css('td:nth-child(3) strike').text.size > 0 ? true : false
 
-  if model_id && model_id != ''
-    brand = model.split(" ").first
+  brand = model.split(" ").first
+  if model_id && !model_id.empty?
+    BRAND_LIST.any? do |word| 
+      if model.include?(word)
+        brand = word
+        model = model.sub(brand,'').strip
+      end
+    end
   else
-    model_id = firm_id.capitalize
+    # if scrape by brand w/o models
+    brand = firm_id.capitalize.sub('_',' ')
   end
        
-  BRAND_LIST.any? do |word| 
-    if model.include?(word)
-      brand = word
-      model = model.sub(brand,'').strip
-    end
-  end
-  
   year = item.css('td:nth-child(4)').text.delete(' ').to_i
   hp = item.css('td:nth-child(5) .gray').text
   info = item.css('td:nth-child(5)').text.strip.squeeze(' ').sub(hp,'')
@@ -227,6 +258,7 @@ def scrape_table_row(item, firms, firm_id, model_id)
     kms: kms*1000,
     cost: cost,
     city: city,
+    sold: sold,
     created_at: DateTime.now,
     updated_at: DateTime.now
   }
@@ -237,10 +269,10 @@ if rub_table_search
     firm_id = firm
     model_cnt = 0
     model_id = models #[model_cnt]
-    url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
+    url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
     loop do
       cnt = 0
-      puts url
+      print url
       session.visit url 
       doc = Nokogiri::HTML(session.html)
       # doc = Nokogiri::HTML(open(url))
@@ -262,7 +294,7 @@ if rub_table_search
             end
         end
       end
-      print " : #{cnt}"
+      print " : #{cnt}\n"
       pager = doc.css('.pager')
       # binding.pry
       if pager && (pager.css('> a').text == "Следующая" || pager.css('> a:last').text == "Следующая" )
@@ -270,7 +302,7 @@ if rub_table_search
         url = page
       elsif model_id && model_cnt < ((model_id.size) - 1)
         model_cnt += 1
-        url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, minprice, maxprice, transmission_id, privod)
+        url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
       else
         break
       end
@@ -284,8 +316,8 @@ end
 # dataset.offset(off).each do |car|
 # dataset.filter('id > 1749').each do |car|
 if rub_details_scrape
-  # dataset.where('updated_at < ? AND sold = false', Time.now - 24*60*60).each do |car| # 24 hours
-  dataset.where('updated_at < ?', Time.now - 12*60*60).each do |car| # 24 hours
+  # dataset.where('updated_at < ? AND sold = false', Time.now - 12*60*60).each do |car| # 12 hours
+  dataset.where('updated_at < ? AND sold = false', Time.now - 24*60*60).each do |car| # 24 hours
     puts "#{car[:id]} : #{car[:link]}"
     session.visit car[:link]
     unless session.html.include?('Внимание! Автомобиль продан,')
@@ -388,7 +420,7 @@ if rub_details_scrape
     else
       car = dataset.filter(id: car[:id])
       car.update(
-        souce_removed: true
+        source_removed: true
       )
     end
   end
