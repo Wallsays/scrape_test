@@ -12,28 +12,30 @@ require "sequel"
 
 rub_table_search = false
 rub_details_scrape = false
+run_db_migrate_to_rails = false
 ARGV.each do|a|
   rub_table_search = true if a.to_i == 1
   rub_details_scrape = true if a.to_i == 2
+  run_db_migrate_to_rails = true if a.to_i == 3
 end
 
 # DB = Sequel.connect('postgres://user:password@host:port/database_name')
-DB = Sequel.connect('postgres://localhost/cars')
+# DB = Sequel.connect('postgres://localhost/cars')
+DB = Sequel.connect('postgres://localhost/car_monitor_development')
 unless DB.table_exists?(:cars)
   DB.create_table :cars do
     primary_key :id
-    String :column_name 
     Date :date
-    String :link
-    String :preview
+    String :source_url
+    String :preview_url
     String :brand
     String :model
     Integer :year
     Integer :horsepower
     Float :engine_v
     String :transmission
-    String :wir_dr
-    Integer :kms
+    String :wheel_drive
+    Integer :odometer
     Integer :cost
     String :city
     Text :details
@@ -41,6 +43,8 @@ unless DB.table_exists?(:cars)
     String :color
     String :petrol
     Boolean :sold, default: false
+    DateTime :row_parsed_at
+    DateTime :details_parsed_at
     DateTime :created_at
     DateTime :updated_at
     String :phone
@@ -259,23 +263,24 @@ def scrape_table_row(item, firms, firm_id, model_id)
   city = item.css('td:nth-child(8) span:last').text.delete(' ')
   current_car = {
     date: date,
-    link: link,
-    preview: preview,
+    source_url: link,
+    preview_url: preview,
     model: model,
     brand: brand,
     year: year,
     horsepower: hp.delete('(').to_i,
     engine_v: volume,
     transmission: transmission,
-    wir_dr: wir_dr,
-    kms: kms*1000,
+    wheel_drive: wir_dr,
+    odometer: kms*1000,
     cost: cost,
     city: city,
     sold: sold,
     no_docs: no_docs,
     broken: broken,
     created_at: DateTime.now,
-    updated_at: DateTime.now
+    updated_at: DateTime.now,
+    row_parsed_at: DateTime.now
   }
 end
 
@@ -302,6 +307,7 @@ if rub_table_search
         url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
         loop do
           cnt = 0
+          upd_cnt = 0
           print url
           session = Capybara::Session.new(:poltergeist)
           session.visit url 
@@ -311,21 +317,40 @@ if rub_table_search
             doc.css('.subscriptions_link_wrapper').first.parent.css('tr.row').each do |item|
                 current_car = scrape_table_row(item, firms, firm_id, model_id)
                 # cars << current_car
-                unless dataset.where(link: current_car[:link]).first
+                car = dataset.where(source_url: current_car[:source_url]).first
+                unless car
                   dataset.insert(current_car)
                   cnt += 1
+                else
+                  if car[:sold] != current_car[:sold]
+                    # print " '#{ car[:id] }' "
+                    car = dataset.filter(id: car[:id])
+                    car.update(
+                      sold: current_car[:sold]
+                    )
+                    upd_cnt += 1
+                  end
                 end
             end
             doc.css('.subscriptions_link_wrapper').first.parent.css('tr.h').each do |item|
                 current_car = scrape_table_row(item, firms, firm_id, model_id)
                 # cars << current_car
-                unless dataset.where(link: current_car[:link]).first
+                car = dataset.where(source_url: current_car[:source_url]).first
+                unless car
                   dataset.insert(current_car)
                   cnt += 1
+                else
+                  if car[:sold] != current_car[:sold]
+                    car = dataset.filter(id: car[:id])
+                    car.update(
+                      sold: current_car[:sold]
+                    )
+                    upd_cnt += 1
+                  end
                 end
             end
           end
-          print " : #{cnt}\n"
+          print " : #{cnt} : #{upd_cnt}\n"
           pager = doc.css('.pager')
           # binding.pry
           if pager && (pager.css('> a').text == "Следующая" || pager.css('> a:last').text == "Следующая" )
@@ -335,6 +360,7 @@ if rub_table_search
             model_cnt += 1
             url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
           else
+            session.driver.quit
             break
           end
           session.driver.quit
@@ -357,9 +383,9 @@ if rub_details_scrape
   # dataset.where('created_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60 ).reverse_order(:created_at).each do |car|
   dataset.where('sold = false AND source_removed = false').where(photos:nil).reverse_order(:created_at).each do |car|
     # next if car[:created_at] != car[:updated_at]
-    puts "#{car[:id]} : #{car[:link]}"
+    puts "#{car[:id]} : #{car[:source_url]}"
     session = Capybara::Session.new(:poltergeist)
-    session.visit car[:link]
+    session.visit car[:source_url]
     unless session.html.include?('Внимание! Автомобиль продан,')
       if session.html.include?('Посмотреть карточку продавца')
           if session.html.include?("Показать телефон")
@@ -453,7 +479,7 @@ if rub_details_scrape
       car.update(
         petrol: petrol, 
         color: color, 
-        kms: kms, 
+        odometer: kms, 
         new_car: new_car, 
         steer_wheel: steer_wheel, 
         details: details,
@@ -465,7 +491,7 @@ if rub_details_scrape
         seller_link:  seller_link,
         no_docs: no_docs,
         broken:  broken,
-        updated_at: DateTime.now
+        details_parsed_at: DateTime.now
       )
 
       # binding.pry
@@ -479,6 +505,58 @@ if rub_details_scrape
   end
 end
 # binding.pry
+
+if run_db_migrate_to_rails
+  DB_RAILS = Sequel.connect('postgres://localhost/car_monitor_development')
+  # dataset = DB[:cars]
+  dataset_rails = DB_RAILS[:cars]
+  dataset.each do |car|
+    current_car = {
+      date: car[:date],
+      source_url: car[:link],
+      preview_url: car[:preview],
+      model: car[:model],
+      brand: car[:brand],
+      year: car[:year],
+      horsepower: car[:horsepower],
+      engine_v: car[:engine_v],
+      transmission: car[:transmission],
+      wheel_drive: car[:wir_dr],
+      odometer: car[:kms],
+      cost: car[:cost],
+      city: car[:city],
+      sold: car[:sold],
+      no_docs: car[:no_docs],
+      broken: car[:broken],
+      petrol: car[:petrol], 
+      color: car[:color], 
+      odometer: car[:kms], 
+      new_car: car[:new_car], 
+      steer_wheel: car[:steer_wheel], 
+      details: car[:details],
+      sold: car[:sold],
+      photos: car[:photos],
+      phone: car[:phone],
+      seller_email: car[:seller_email],
+      seller_city:  car[:seller_city],
+      seller_link:  car[:seller_link],
+      no_docs: car[:no_docs],
+      broken:  car[:broken],
+      row_parsed_at: car[:created_at],
+      details_parsed_at: car[:updated_at],
+      created_at: car[:created_at],
+      updated_at: car[:updated_at]
+    }
+    car2 = dataset_rails.where(source_url: car[:link]).first
+    # binding.pry
+    if car2.nil? 
+      dataset_rails.insert(current_car)
+    else
+      car2 = dataset_rails.filter(id: car2[:id])
+      car2.update(current_car)
+    end
+  end
+end
 
 puts dataset.count
 # puts cars.count
