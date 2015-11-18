@@ -76,7 +76,7 @@ Capybara.run_server = false
 # Register PhantomJS (aka poltergeist) as the driver to use
 Capybara.register_driver :poltergeist do |app|
   Capybara::Poltergeist::Driver.new(app, 
-    timeout: 120, 
+    timeout: 180, 
     # js_errors: false,
     phantomjs_options: [
       '--load-images=false', 
@@ -419,6 +419,8 @@ if rub_details_scrape
       end
       new_car = unless item.css('span:contains("Пробег")').empty?
         item.css('span:contains("Пробег")').first.next_sibling.text.include?("Новый")
+      else
+        false
       end
       steer_wheel = unless item.css('span:contains("Руль")').empty?
         item.css('span:contains("Руль")').first.next_sibling.text.strip
@@ -428,9 +430,13 @@ if rub_details_scrape
       end
       no_docs = unless item.parent.css('span:contains("Особые отметки")').empty?
         item.parent.css('span:contains("Особые отметки")').first.next_sibling.text.strip.include?("без документов")
+      else
+        false
       end
       broken = unless item.parent.css('span:contains("Особые отметки")').empty?
         item.parent.css('span:contains("Особые отметки")').first.next_sibling.text.strip.include?("битый или не на ходу")
+      else
+        false
       end
       sold = doc.css('span.warning strong').text.include?("продан")
       
