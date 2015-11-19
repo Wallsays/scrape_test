@@ -66,6 +66,8 @@ end
 # DB[:cars].where(source_removed:nil).update(source_removed:false)
 # DB.set_column_default :cars, :source_removed, false
 dataset = DB[:cars]
+brands_set = DB[:brands]
+models_set = DB[:models]
 # dataset.filter(year: 2009).map(:id) => [16, 26, 29]
 # dataset.filter(id: 8277).delete
 
@@ -259,9 +261,38 @@ def scrape_table_row(item, firms, firm_id, model_id)
     end
   end
 
+  brd = brands_set.filter(title: brand)
+  if brd.first.nil?
+    brands_set.insert({
+      title: brand,
+      created_at: DateTime.now,
+      updated_at: DateTime.now
+    })
+    brd = brands_set.filter(title: brand)
+  end
+  # binding.pry
+  mdl = models_set.filter(title: model, brand_id: brd.first[:id])
+  if mdl.first.nil?
+    models_set.insert({
+      title: model, 
+      brand_id: brd.first[:id], 
+      rate: model_rate,
+      created_at: DateTime.now,
+      updated_at: DateTime.now
+    })
+    mdl = models_set.filter(title: model, brand_id: brd.first[:id])
+  elsif mdl.first[:rate].nil?
+    mdl.update({
+      rate: model_rate,
+      updated_at: DateTime.now
+    })
+  end
+
   cost = item.css('td:nth-child(8) .f14').text.delete(' ').to_i
   city = item.css('td:nth-child(8) span:last').text.delete(' ')
   current_car = {
+    brand_id: brd.first[:id],
+    model_id: mdl.first[:id],
     date: date,
     source_url: link,
     preview_url: preview,
@@ -481,8 +512,38 @@ if rub_details_scrape
         photos << pic
       end
 
+      model_rate = doc.css('.b-sticker.b-sticker_theme_rating').first.child.next.text.to_f
+      brd = brands_set.filter(title: car[:brand])
+      if brd.first.nil?
+        brands_set.insert({
+          title: car[:brand],
+          created_at: DateTime.now,
+          updated_at: DateTime.now
+        })
+        brd = brands_set.filter(title: car[:brand])
+      end
+      # binding.pry
+      mdl = models_set.filter(title: car[:model], brand_id: brd.first[:id])
+      if mdl.first.nil?
+        models_set.insert({
+          title: car[:model], 
+          brand_id: brd.first[:id], 
+          rate: model_rate,
+          created_at: DateTime.now,
+          updated_at: DateTime.now
+        })
+        mdl = models_set.filter(title: car[:model], brand_id: brd.first[:id])
+      elsif mdl.first[:rate].nil?
+        mdl.update({
+          rate: model_rate,
+          updated_at: DateTime.now
+        })
+      end
+
       car = dataset.filter(id: car[:id])
       car.update(
+        brand_id: brd.first[:id],
+        model_id: mdl.first[:id],
         petrol: petrol, 
         color: color, 
         odometer: kms, 
