@@ -222,12 +222,14 @@ end
 # Report using a particular user agent
 # session.driver.headers = { 'User-Agent' => "Mozilla/5.0 (Macintosh; Intel Mac OS X)" }
 
-def scrape_table_row(item, firms, firm_id, model_id)
+def scrape_table_row(item, firms, firm_id, model_id, brands_set, models_set)
   date = Date.strptime( item.css('td:nth-child(1) a').text , '%d-%m')
   link = item.css('td:nth-child(2) img').first.parent.attribute('href').value
   preview = item.css('td:nth-child(2) img').attribute('src').value
   model = item.css('td:nth-child(3)').text.strip.squeeze(' ')
   sold = item.css('td:nth-child(3) strike').text.size > 0 ? true : false
+
+  new_car = item.css('td > .b-sticker.b-sticker_theme_new').empty? ? false : true
 
   brand = model.split(" ").first
   if model_id && !model_id.empty?
@@ -281,11 +283,11 @@ def scrape_table_row(item, firms, firm_id, model_id)
       updated_at: DateTime.now
     })
     mdl = models_set.filter(title: model, brand_id: brd.first[:id])
-  elsif mdl.first[:rate].nil?
-    mdl.update({
-      rate: model_rate,
-      updated_at: DateTime.now
-    })
+  # elsif mdl.first[:rate].nil?
+  #   mdl.update({
+  #     rate: model_rate,
+  #     updated_at: DateTime.now
+  #   })
   end
 
   cost = item.css('td:nth-child(8) .f14').text.delete(' ').to_i
@@ -293,6 +295,7 @@ def scrape_table_row(item, firms, firm_id, model_id)
   current_car = {
     brand_id: brd.first[:id],
     model_id: mdl.first[:id],
+    new_car: new_car,
     date: date,
     source_url: link,
     preview_url: preview,
@@ -346,7 +349,7 @@ if rub_table_search
           # doc = Nokogiri::HTML(open(url))
           unless doc.css('.subscriptions_link_wrapper').empty?
             doc.css('.subscriptions_link_wrapper').first.parent.css('tr.row').each do |item|
-                current_car = scrape_table_row(item, firms, firm_id, model_id)
+                current_car = scrape_table_row(item, firms, firm_id, model_id, brands_set, models_set)
                 # cars << current_car
                 car = dataset.where(source_url: current_car[:source_url]).first
                 unless car
@@ -364,7 +367,7 @@ if rub_table_search
                 end
             end
             doc.css('.subscriptions_link_wrapper').first.parent.css('tr.h').each do |item|
-                current_car = scrape_table_row(item, firms, firm_id, model_id)
+                current_car = scrape_table_row(item, firms, firm_id, model_id, brands_set, models_set)
                 # cars << current_car
                 car = dataset.where(source_url: current_car[:source_url]).first
                 unless car
@@ -413,6 +416,7 @@ if rub_details_scrape
   # dataset.where('id > 15461 AND sold = false AND source_removed = false').each do |car|
   # dataset.where('created_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60 ).reverse_order(:created_at).each do |car|
   dataset.where('sold = false AND source_removed = false').where(photos:nil).reverse_order(:created_at).each do |car|
+  # dataset.where(id:14198).reverse_order(:created_at).each do |car|
     # next if car[:created_at] != car[:updated_at]
     puts "#{car[:id]} : #{car[:source_url]}"
     session = Capybara::Session.new(:poltergeist)
@@ -449,7 +453,7 @@ if rub_details_scrape
         item.css('span:contains("Пробег, км")').first.next_sibling.text.strip.to_i
       end
       new_car = unless item.css('span:contains("Пробег")').empty?
-        item.css('span:contains("Пробег")').first.next_sibling.text.include?("Новый")
+        item.css('span:contains("Пробег")').first.next_sibling.next_sibling.text.include?("Новый")
       else
         false
       end
