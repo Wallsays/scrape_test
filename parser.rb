@@ -278,7 +278,7 @@ def scrape_table_row(item, firms, firm_id, model_id, brands_set, models_set)
     models_set.insert({
       title: model, 
       brand_id: brd.first[:id], 
-      rate: model_rate,
+      # rate: model_rate,
       created_at: DateTime.now,
       updated_at: DateTime.now
     })
