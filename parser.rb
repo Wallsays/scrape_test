@@ -51,7 +51,7 @@ unless DB.table_exists?(:cars)
     Boolean :new_car, default: false
     String :photos
     String :seller_email
-    String :seller_link
+    String :seller_source_url
     String :seller_city
     Boolean :source_removed, default: false
     Boolean :no_docs, default: false
@@ -113,6 +113,7 @@ firms = {
   'mercedes-benz'=> [],
   'bmw' => [],
   'audi' => [],
+  'volvo' => [],
   'renault' => [],
   'skoda' => [],
   'opel' => [],
@@ -124,7 +125,7 @@ firms = {
 min_year = 2000
 max_year = 2015
 minprice = 200000
-maxprice = 1000000
+maxprice = 1500000
 # transmission_id = 2 # autoamatic
 # privod = 2 # 1 - передний, 2 - задний, 3 - 4WD 
 model_id ||= nil
@@ -227,6 +228,8 @@ def scrape_table_row(item, firms, firm_id, model_id, brands_set, models_set)
   link = item.css('td:nth-child(2) img').first.parent.attribute('href').value
   preview = item.css('td:nth-child(2) img').attribute('src').value
   model = item.css('td:nth-child(3)').text.strip.squeeze(' ')
+  equipment_name = item.css('td:nth-child(3) small').text.strip.squeeze(' ')
+  model = model.sub(equipment_name, '').strip if equipment_name.length > 0
   sold = item.css('td:nth-child(3) strike').text.size > 0 ? true : false
 
   new_car = item.css('td > .b-sticker.b-sticker_theme_new').empty? ? false : true
@@ -293,6 +296,7 @@ def scrape_table_row(item, firms, firm_id, model_id, brands_set, models_set)
   cost = item.css('td:nth-child(8) .f14').text.delete(' ').to_i
   city = item.css('td:nth-child(8) span:last').text.delete(' ')
   current_car = {
+    equipment_name: equipment_name,
     brand_id: brd.first[:id],
     model_id: mdl.first[:id],
     new_car: new_car,
@@ -417,7 +421,7 @@ if rub_details_scrape
   # dataset.where('created_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60 ).reverse_order(:created_at).each do |car|
   dataset.where('sold = false AND source_removed = false').where(photos: [nil, ""]).reverse_order(:created_at).each do |car|
   # dataset.where(id:[23321, 23320, 18317, 8899]).reverse_order(:created_at).each do |car|
-  # dataset.where(id:23320).reverse_order(:created_at).each do |car|
+  # dataset.where(id:13815).reverse_order(:created_at).each do |car|
     # next if car[:created_at] != car[:updated_at]
     puts "#{car[:id]} : #{car[:source_url]}"
     session = Capybara::Session.new(:poltergeist)
@@ -472,6 +476,11 @@ if rub_details_scrape
       exchange = unless doc.css('span:contains("Обмен")').empty?
         doc.css('span:contains("Обмен")').first.next_sibling.text.strip
       end
+      equipment_url = nil
+      equipment_name = unless doc.css('span:contains("Комплектация:")').empty?
+        equipment_url = doc.css('span:contains("Комплектация:")').first.next_sibling.next_sibling.attribute('href').value
+        doc.css('span:contains("Комплектация:")').first.next_sibling.next_sibling.text.strip
+      end
       details = unless item.parent.css('span:contains("Дополнительно")').empty?
         item.parent.css('span:contains("Дополнительно")').first.parent.text.sub('Дополнительно:', '').gsub(/\r?\n/, '<br>')
       end
@@ -492,8 +501,10 @@ if rub_details_scrape
       closed = doc.css('span.warning strong').text.include?("Объявление находится в архиве")
       
       seller_email = nil
-      seller_link  = nil
+      seller_source_url  = nil
       seller_city  = nil
+      seller_site_url = nil
+      seller_address = nil
       phone = if session.html.include?('Посмотреть карточку продавца')
         seller_email = unless doc.css('span:contains("E-mail")').empty?
           doc.css('span:contains("E-mail")').first.next.next.next.css('a').first.text
@@ -501,7 +512,13 @@ if rub_details_scrape
         seller_city = unless doc.css('span:contains("Город")').empty?
           doc.css('span:contains("Город")').first.next_sibling.text.strip
         end
-        seller_link = unless doc.css('a:contains("Посмотреть карточку продавца")').empty?
+        seller_site_url = unless doc.css('span:contains("Сайт:")').empty?
+          doc.css('span:contains("Сайт:")').first.next_sibling.next_sibling.next_sibling.attribute('href').value
+        end
+        seller_address = unless doc.css('span:contains("Адрес:")').empty?
+          doc.css('span:contains("Адрес:")').first.next_sibling.text.strip
+        end
+        seller_source_url = unless doc.css('a:contains("Посмотреть карточку продавца")').empty?
           doc.css('a:contains("Посмотреть карточку продавца")').first.attribute('href').value
         end
         unless doc.css('span:contains("Телефон")').empty?
@@ -568,6 +585,10 @@ if rub_details_scrape
 
       car = dataset.filter(id: car[:id])
       car.update(
+        seller_address: seller_address,
+        seller_site_url: seller_site_url,
+        equipment_name: equipment_name,
+        equipment_url: equipment_url,
         kms_not_in_rus: kms_not_in_rus,
         body_type: body_type,
         exchange: exchange,
@@ -586,7 +607,7 @@ if rub_details_scrape
         phone: phone,
         seller_email: seller_email,
         seller_city:  seller_city,
-        seller_link:  seller_link,
+        seller_source_url:  seller_source_url,
         no_docs: no_docs,
         broken:  broken,
         details_parsed_at: DateTime.now
@@ -637,7 +658,7 @@ if run_db_migrate_to_rails
       phone: car[:phone],
       seller_email: car[:seller_email],
       seller_city:  car[:seller_city],
-      seller_link:  car[:seller_link],
+      seller_source_url:  car[:seller_source_url],
       no_docs: car[:no_docs],
       broken:  car[:broken],
       row_parsed_at: car[:created_at],
