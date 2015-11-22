@@ -415,8 +415,9 @@ if rub_details_scrape
   # dataset.where('created_at < ? AND updated_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60).each do |car|
   # dataset.where('id > 15461 AND sold = false AND source_removed = false').each do |car|
   # dataset.where('created_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60 ).reverse_order(:created_at).each do |car|
-  dataset.where('sold = false AND source_removed = false').where(photos:nil).reverse_order(:created_at).each do |car|
-  # dataset.where(id:14198).reverse_order(:created_at).each do |car|
+  dataset.where('sold = false AND source_removed = false').where(photos: [nil, ""]).reverse_order(:created_at).each do |car|
+  # dataset.where(id:[23321, 23320, 18317, 8899]).reverse_order(:created_at).each do |car|
+  # dataset.where(id:23320).reverse_order(:created_at).each do |car|
     # next if car[:created_at] != car[:updated_at]
     puts "#{car[:id]} : #{car[:source_url]}"
     session = Capybara::Session.new(:poltergeist)
@@ -452,16 +453,30 @@ if rub_details_scrape
       kms = unless item.css('span:contains("Пробег, км")').empty?
         item.css('span:contains("Пробег, км")').first.next_sibling.text.strip.to_i
       end
-      new_car = unless item.css('span:contains("Пробег")').empty?
-        item.css('span:contains("Пробег")').first.next_sibling.next_sibling.text.include?("Новый")
+      new_car = unless item.css('span:contains("Пробег:")').empty?
+        item.css('span:contains("Пробег:")').first.next_sibling.next_sibling.text.include?("Новый")
+      else
+        false
+      end
+      kms_not_in_rus = unless item.css('span:contains("Пробег по России:")').empty?
+        item.css('span:contains("Пробег по России:")').first.next_sibling.text.include?("без пробега")
       else
         false
       end
       steer_wheel = unless item.css('span:contains("Руль")').empty?
         item.css('span:contains("Руль")').first.next_sibling.text.strip
       end
+      body_type = unless item.css('span:contains("Тип кузова")').empty?
+        item.css('span:contains("Тип кузова")').first.next_sibling.text.strip
+      end
+      exchange = unless doc.css('span:contains("Обмен")').empty?
+        doc.css('span:contains("Обмен")').first.next_sibling.text.strip
+      end
       details = unless item.parent.css('span:contains("Дополнительно")').empty?
         item.parent.css('span:contains("Дополнительно")').first.parent.text.sub('Дополнительно:', '').gsub(/\r?\n/, '<br>')
+      end
+      tuning = unless item.parent.css('span:contains("Тюнинг")').empty?
+        item.parent.css('span:contains("Тюнинг")').first.parent.text.sub('Тюнинг:', '').gsub(/\r?\n/, '<br>')
       end
       no_docs = unless item.parent.css('span:contains("Особые отметки")').empty?
         item.parent.css('span:contains("Особые отметки")').first.next_sibling.text.strip.include?("без документов")
@@ -474,6 +489,7 @@ if rub_details_scrape
         false
       end
       sold = doc.css('span.warning strong').text.include?("продан")
+      closed = doc.css('span.warning strong').text.include?("Объявление находится в архиве")
       
       seller_email = nil
       seller_link  = nil
@@ -508,12 +524,18 @@ if rub_details_scrape
       # end
 
       photos = []
-      doc.css('#usual_photos a').each do |link|
-        next if link.css('img').empty?
-        pic = []
-        pic[0] = link.attribute('href').value
-        pic[1] = link.css('img').first.attribute('src').value
+      photos_block = doc.css('#usual_photos a')
+      if photos_block.empty?
+        pic = doc.css('table.auto td img').first.attribute('src').value
         photos << pic
+      else
+        photos_block.each do |link|
+          next if link.css('img').empty?
+          pic = []
+          pic[0] = link.attribute('href').value
+          pic[1] = link.css('img').first.attribute('src').value
+          photos << pic
+        end
       end
 
       model_rate = doc.css('.b-sticker.b-sticker_theme_rating').first.child.next.text.to_f
@@ -546,6 +568,11 @@ if rub_details_scrape
 
       car = dataset.filter(id: car[:id])
       car.update(
+        kms_not_in_rus: kms_not_in_rus,
+        body_type: body_type,
+        exchange: exchange,
+        closed: closed,
+        tuning: tuning,
         brand_id: brd.first[:id],
         model_id: mdl.first[:id],
         petrol: petrol, 
