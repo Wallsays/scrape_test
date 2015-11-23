@@ -419,7 +419,8 @@ if rub_details_scrape
   # dataset.where('created_at < ? AND updated_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60).each do |car|
   # dataset.where('id > 15461 AND sold = false AND source_removed = false').each do |car|
   # dataset.where('created_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60 ).reverse_order(:created_at).each do |car|
-  dataset.where('sold = false AND source_removed = false').where(photos: [nil, ""]).reverse_order(:created_at).each do |car|
+  dataset.where('sold = false AND source_removed = false').where(photos: nil).reverse_order(:created_at).each do |car|
+  # dataset.where("year = 2015 AND seller_source_url IS NOT NULL AND equipment_name IS NOT NULL").reverse_order(:created_at).each do |car|
   # dataset.where(id:[23321, 23320, 18317, 8899]).reverse_order(:created_at).each do |car|
   # dataset.where(id:13815).reverse_order(:created_at).each do |car|
     # next if car[:created_at] != car[:updated_at]
@@ -565,7 +566,7 @@ if rub_details_scrape
         })
         brd = brands_set.filter(title: car[:brand])
       end
-      # binding.pry
+      car[:model] = car[:model].sub(equipment_name, '').strip if !equipment_name.nil? && equipment_name != "" && car[:model].include?(equipment_name)
       mdl = models_set.filter(title: car[:model], brand_id: brd.first[:id])
       if mdl.first.nil?
         models_set.insert({
