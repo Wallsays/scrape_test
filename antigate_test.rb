@@ -26,6 +26,12 @@ end
 
 include Capybara::DSL
 
+# Test proxy
+# session = Capybara::Session.new(:poltergeist)
+# session.visit "https://switchvpn.net/order"
+# session.save_screenshot('page.jpeg')
+# session.driver.quit
+
 def send_captcha( key, captcha_file )
   uri = URI.parse( 'http://antigate.com/in.php' )
   file = File.new( captcha_file, 'rb' )
@@ -104,6 +110,9 @@ def parse_phone(session)
       unless doc.css('span:contains("Телефон")').empty?
         doc.css('span:contains("Телефон")').first.next_sibling.text.strip
       end
+      unless doc.css('span:contains("Контакт")').empty?
+        doc.css('span:contains("Контакт")').first.next_sibling.text.strip
+      end
     else
       doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
     end
@@ -133,6 +142,7 @@ dataset.where('sold = false AND source_removed = false AND closed = false').wher
   sleep 2
   phone = ""
   phone = parse_phone(session)
+  phone.sub!(/\d\+/, ",+") if !phone.nil? && phone.length > 0
   puts phone
   # binding.pry
   if !phone.nil? && phone != "" 
@@ -142,6 +152,7 @@ dataset.where('sold = false AND source_removed = false AND closed = false').wher
     )
     session.driver.quit  
     puts 'Updated'
+    sleep rand(10..20)
     next
   end
   doc = Nokogiri::HTML(session.html)
@@ -198,6 +209,7 @@ dataset.where('sold = false AND source_removed = false AND closed = false').wher
   session.click_button('captchaSubmitButton') 
   sleep 5
   phone = parse_phone(session)
+  phone.sub!(/\d\+/, ",+") if !phone.nil? && phone.length > 0
   puts phone
   # binding.pry
   if !phone.nil? && phone != "" 
@@ -209,7 +221,7 @@ dataset.where('sold = false AND source_removed = false AND closed = false').wher
     session.driver.quit  
     next
   end
-  session.save_screenshot('page.jpeg', :selector => '.adv-text')
+  # session.save_screenshot('page.jpeg', :selector => '.adv-text')
   session.driver.quit  
 end
 

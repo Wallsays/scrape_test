@@ -1,5 +1,7 @@
 require "rubygems"
 require 'open-uri'
+require 'net/http'
+require 'net/http/post/multipart'
 require 'nokogiri'
 # require 'watir-webdriver'
 require 'capybara'
@@ -81,14 +83,20 @@ Capybara.register_driver :poltergeist do |app|
     timeout: 180, 
     # js_errors: false,
     phantomjs_options: [
-      '--load-images=false', 
+      # '--load-images=false', 
       # "--proxy-auth=#{proxy.username}:#{proxy.password}",
-      # "--proxy=92.110.173.139:80",
+      # "--proxy=91.197.191.65:9090",
       '--disk-cache=false'
       ])
 end
 
 include Capybara::DSL
+
+# Test proxy
+# session = Capybara::Session.new(:poltergeist)
+# session.visit "https://switchvpn.net/order"
+# session.save_screenshot('page.jpeg')
+# session.driver.quit
 
 domain = "auto.drom.ru"
 # city = '' 
@@ -122,10 +130,11 @@ firms = {
   'ssang_yong' => [],
   'citroen' => []
 }
-min_year = 2000
+min_year = 1995
+# min_year = 2009
 max_year = 2015
 minprice = 200000
-maxprice = 1500000
+maxprice = 2000000
 # transmission_id = 2 # autoamatic
 # privod = 2 # 1 - передний, 2 - задний, 3 - 4WD 
 model_id ||= nil
@@ -149,7 +158,7 @@ BRAND_LIST = [
   "Hafei", "Haima", "Honda", "Hummer", "Hyundai", "Haval",
   "Infiniti", "Isuzu", "Jaguar", "Jeep", "Kia", 
   "Land Rover", "Lexus", "Lifan", "Lincoln", "Luxgen",
-  "Mazda", "Mercedes-Benz", "Mini", "Mitsubishi",
+  "Mazda", "Mercedes-Benz", "Mitsubishi", #, "Mini"
   "Nissan", "Opel", "Peugeot", "Plymouth", "Pontiac", "Porsche", "Proton",
   "Renault", "Rover", 
   "Saab", "Saturn", "Scion", "SEAT", "Skoda", "Smart", "SsangYong", "Subaru", "Suzuki", 
@@ -338,17 +347,21 @@ if rub_table_search
       minprice = price
       maxprice = price + price_step
       maxprice = end_price if maxprice > end_price
+      next if maxprice == minprice
       (beg_year..end_year).step( year_step ) do |year|
         min_year = year
         max_year = year + year_step
         max_year = Date.today.year if max_year > Date.today.year
+        next if max_year == min_year
         url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
         loop do
           cnt = 0
           upd_cnt = 0
           print url
+          # sleep rand(5..20)
           session = Capybara::Session.new(:poltergeist)
           session.visit url 
+          session.save_screenshot('page.jpeg')
           doc = Nokogiri::HTML(session.html)
           # doc = Nokogiri::HTML(open(url))
           unless doc.css('.subscriptions_link_wrapper').empty?
@@ -409,6 +422,96 @@ if rub_table_search
   end
 end
 
+
+
+def send_captcha( key, captcha_file )
+  uri = URI.parse( 'http://antigate.com/in.php' )
+  file = File.new( captcha_file, 'rb' )
+  req = Net::HTTP::Post::Multipart.new( uri.path,
+                                        :method => 'post',
+                                        :key => key,
+                                        :file => UploadIO.new( file, 'image/jpeg', 'image.jpg' ),
+                                        :is_russian => 1)
+  http = Net::HTTP.new( uri.host, uri.port )
+  begin
+    resp = http.request( req )
+  rescue => err
+    puts err
+    return nil
+  end#begin
+  
+  id = resp.body
+  return id[ 3..id.size ]
+end#def
+
+def get_captcha_text( key, id )
+  data = { :key => key,
+           :action => 'get',
+           :id => id,
+           :min_len => 5,
+           :max_len => 5 }
+  uri = URI.parse('http://antigate.com/res.php' )
+  req = Net::HTTP::Post.new( uri.path )
+  http = Net::HTTP.new( uri.host, uri.port )
+  req.set_form_data( data )
+
+  begin
+    resp = http.request(req)
+  rescue => err
+    puts err
+    return nil
+  end
+  
+  text = resp.body
+  if text != "CAPCHA_NOT_READY"
+    return text[ 3..text.size ]
+  end#if
+  return nil
+end#def
+
+def report_bad( key, id )
+  data = { :key => key,
+           :action => 'reportbad',
+           :id => id }
+  uri = URI.parse('http://antigate.com/res.php' )
+  req = Net::HTTP::Post.new( uri.path )
+  http = Net::HTTP.new( uri.host, uri.port )
+  req.set_form_data( data )
+
+  begin
+    resp = http.request(req)
+  rescue => err
+    puts err
+  end
+end#def
+
+
+
+def parse_phone(session)
+  doc = Nokogiri::HTML(session.html)
+  phone = if session.html.include?('Посмотреть карточку продавца')
+    unless doc.css('span:contains("Телефон")').empty?
+      doc.css('span:contains("Телефон")').first.next_sibling.text.strip
+    else
+      unless doc.css('span:contains("Контакт")').empty?
+        doc.css('span:contains("Контакт")').first.next_sibling.text.strip
+      else
+        doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
+      end
+    end
+  else
+    if doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').empty?
+      unless doc.css('span:contains("Телефон")').empty?
+        doc.css('span:contains("Телефон")').first.next_sibling.text.strip
+      end
+      unless doc.css('span:contains("Контакт")').empty?
+        doc.css('span:contains("Контакт")').first.next_sibling.text.strip
+      end
+    else
+      doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
+    end
+  end
+end
 
 # off = 1058 - dataset.order(:id).first[:id] 
 # off = 400
@@ -506,40 +609,49 @@ if rub_details_scrape
       seller_city  = nil
       seller_site_url = nil
       seller_address = nil
-      phone = if session.html.include?('Посмотреть карточку продавца')
-        seller_email = unless doc.css('span:contains("E-mail")').empty?
-          doc.css('span:contains("E-mail")').first.next.next.next.css('a').first.text
-        end
-        seller_city = unless doc.css('span:contains("Город")').empty?
-          doc.css('span:contains("Город")').first.next_sibling.text.strip
-        end
-        seller_site_url = unless doc.css('span:contains("Сайт:")').empty?
-          doc.css('span:contains("Сайт:")').first.next_sibling.next_sibling.next_sibling.attribute('href').value
-        end
-        seller_address = unless doc.css('span:contains("Адрес:")').empty?
-          doc.css('span:contains("Адрес:")').first.next_sibling.text.strip
-        end
-        seller_source_url = unless doc.css('a:contains("Посмотреть карточку продавца")').empty?
-          doc.css('a:contains("Посмотреть карточку продавца")').first.attribute('href').value
-        end
-        unless doc.css('span:contains("Телефон")').empty?
-          doc.css('span:contains("Телефон")').first.next_sibling.text.strip
-        else
-          unless doc.css('span:contains("Контакт")').empty?
-            doc.css('span:contains("Контакт")').first.next_sibling.text.strip
-          else
-            doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
-          end
-        end
-      else
-        doc.css('.b-media-cont__label.b-media-cont__label_no-wrap').text
+      seller_email = unless doc.css('span:contains("E-mail")').empty?
+        doc.css('span:contains("E-mail")').first.next.next.next.css('a').first.text
       end
-      
-      # if session.html.include?('Посмотреть карточку продавца') && !sold && (phone.nil? || phone.empty?)
-      #   puts phone
-      #   puts seller_email
-      #   binding.pry
-      # end
+      seller_city = unless doc.css('span:contains("Город")').empty?
+        doc.css('span:contains("Город")').first.next_sibling.text.strip
+      end
+      seller_site_url = unless doc.css('span:contains("Сайт:")').empty?
+        doc.css('span:contains("Сайт:")').first.next_sibling.next_sibling.next_sibling.attribute('href').value
+      end
+      seller_address = unless doc.css('span:contains("Адрес:")').empty?
+        doc.css('span:contains("Адрес:")').first.next_sibling.text.strip
+      end
+      seller_source_url = unless doc.css('a:contains("Посмотреть карточку продавца")').empty?
+        doc.css('a:contains("Посмотреть карточку продавца")').first.attribute('href').value
+      end
+      phone = parse_phone(session)
+      phone.sub!(/\d\+/, ",+") if !phone.nil? && phone.length > 0
+      if (phone.nil? || phone == "") && !doc.css('img#captchaImageContainer').empty?
+        session.save_screenshot('page.jpeg', :selector => '.adv-text')
+        session.save_screenshot('captcha.jpeg', :selector => 'img#captchaImageContainer')
+        key = ENV['ANITGATE_KEY']
+        captcha = 'captcha.jpeg'
+        recognition_time = 10
+        #recognize capcha
+        id = send_captcha( key, captcha )
+        sleep( recognition_time )
+        code = nil
+        while code == nil do
+          code = get_captcha_text( key, id )
+          sleep 1
+        end#while
+        puts 'captcha: ' + code
+        unless code.include?("error_")
+          input = session.find('#captchaInputContainer input')
+          input.set(code.force_encoding('UTF-8').downcase)
+          session.click_button('captchaSubmitButton') 
+          sleep rand(5..10)
+          phone = parse_phone(session)
+          phone.sub!(/\d\+/, ",+") if !phone.nil? && phone.length > 0
+          puts phone
+        end
+      end
+      # binding.pry
 
       photos = []
       photos_block = doc.css('#usual_photos a')
@@ -556,7 +668,11 @@ if rub_details_scrape
         end
       end
 
-      model_rate = doc.css('.b-sticker.b-sticker_theme_rating').first.child.next.text.to_f
+      model_rate = unless doc.css('.b-sticker.b-sticker_theme_rating').empty?
+        doc.css('.b-sticker.b-sticker_theme_rating').first.child.next.text.to_f
+      else
+        0.0
+      end
       brd = brands_set.filter(title: car[:brand])
       if brd.first.nil?
         brands_set.insert({
