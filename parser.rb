@@ -1,16 +1,12 @@
-require "rubygems"
-require 'open-uri'
-require 'net/http'
-require 'net/http/post/multipart'
 require 'nokogiri'
-# require 'watir-webdriver'
 require 'capybara'
 require 'capybara/dsl'
 require 'capybara/poltergeist'
 require 'pry'
 require 'ap'
-# require 'pg'
 require "sequel"
+require 'net/http'
+require 'net/http/post/multipart'
 
 rub_table_search = false
 rub_details_scrape = false
@@ -83,7 +79,7 @@ Capybara.register_driver :poltergeist do |app|
     timeout: 180, 
     # js_errors: false,
     phantomjs_options: [
-      # '--load-images=false', 
+      '--load-images=false', 
       # "--proxy-auth=#{proxy.username}:#{proxy.password}",
       # "--proxy=91.197.191.65:9090",
       '--disk-cache=false'
@@ -131,7 +127,7 @@ firms = {
   'citroen' => []
 }
 min_year = 1995
-# min_year = 2009
+# min_year = 2005
 max_year = 2015
 minprice = 200000
 maxprice = 2000000
@@ -238,8 +234,9 @@ def scrape_table_row(item, firms, firm_id, model_id, brands_set, models_set)
   preview = item.css('td:nth-child(2) img').attribute('src').value
   model = item.css('td:nth-child(3)').text.strip.squeeze(' ')
   equipment_name = item.css('td:nth-child(3) small').text.strip.squeeze(' ')
-  model = model.sub(equipment_name, '').strip if equipment_name.length > 0
+  model.sub!(equipment_name, '').strip if equipment_name.length > 0
   sold = item.css('td:nth-child(3) strike').text.size > 0 ? true : false
+  model.sub!('сертифицирован', '')
 
   new_car = item.css('td > .b-sticker.b-sticker_theme_new').empty? ? false : true
 
@@ -360,8 +357,17 @@ if rub_table_search
           print url
           # sleep rand(5..20)
           session = Capybara::Session.new(:poltergeist)
-          session.visit url 
-          session.save_screenshot('page.jpeg')
+          # session.visit url 
+          visit_state = false
+          while !visit_state do
+            begin
+              session.visit url
+              visit_state = true
+            rescue Capybara::Poltergeist::TimeoutError => e
+              sleep rand(5*60..10*60)
+            end
+          end
+          # session.save_screenshot('page.jpeg')
           doc = Nokogiri::HTML(session.html)
           # doc = Nokogiri::HTML(open(url))
           unless doc.css('.subscriptions_link_wrapper').empty?
@@ -627,7 +633,7 @@ if rub_details_scrape
       phone = parse_phone(session)
       phone.sub!(/\d\+/, ",+") if !phone.nil? && phone.length > 0
       if (phone.nil? || phone == "") && !doc.css('img#captchaImageContainer').empty?
-        session.save_screenshot('page.jpeg', :selector => '.adv-text')
+        # session.save_screenshot('page.jpeg', :selector => '.adv-text')
         session.save_screenshot('captcha.jpeg', :selector => 'img#captchaImageContainer')
         key = ENV['ANITGATE_KEY']
         captcha = 'captcha.jpeg'
