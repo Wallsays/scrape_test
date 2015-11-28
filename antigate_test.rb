@@ -1,6 +1,4 @@
-# encoding: utf-8
-
-require 'rest-client'
+require 'nokogiri'
 require 'capybara'
 require 'capybara/dsl'
 require 'capybara/poltergeist'
@@ -8,90 +6,80 @@ require 'pry'
 require 'ap'
 require "sequel"
 
+# for Antigate
 require 'net/http'
 require 'net/http/post/multipart'
 
-# Register PhantomJS (aka poltergeist) as the driver to use
-Capybara.register_driver :poltergeist do |app|
-  Capybara::Poltergeist::Driver.new(app, 
-    timeout: 180, 
-    # js_errors: false,
-    phantomjs_options: [
-      # '--load-images=false', 
-      # "--proxy-auth=#{proxy.username}:#{proxy.password}",
-      # "--proxy=92.110.173.139:80",
-      '--disk-cache=false'
-      ])
-end
+class AntigateAPIClient
 
-include Capybara::DSL
+  DEFAULT_API_URL = 'http://antigate.com'
 
-# Test proxy
-# session = Capybara::Session.new(:poltergeist)
-# session.visit "https://switchvpn.net/order"
-# session.save_screenshot('page.jpeg')
-# session.driver.quit
+  def initialize(key)
+    @key = key
+  end
 
-def send_captcha( key, captcha_file )
-  uri = URI.parse( 'http://antigate.com/in.php' )
-  file = File.new( captcha_file, 'rb' )
-  req = Net::HTTP::Post::Multipart.new( uri.path,
-                                        :method => 'post',
-                                        :key => key,
-                                        :file => UploadIO.new( file, 'image/jpeg', 'image.jpg' ),
-                                        :is_russian => 1)
-  http = Net::HTTP.new( uri.host, uri.port )
-  begin
-    resp = http.request( req )
-  rescue => err
-    puts err
-    return nil
-  end#begin
-  
-  id = resp.body
-  return id[ 3..id.size ]
-end#def
+  def send_captcha( captcha_file )
+    uri = URI.parse( "#{DEFAULT_API_URL}/in.php" )
+    file = File.new( captcha_file, 'rb' )
+    req = Net::HTTP::Post::Multipart.new( uri.path,
+                                          :method => 'post',
+                                          :key => @key,
+                                          :file => UploadIO.new( file, 'image/jpeg', 'image.jpg' ),
+                                          :is_russian => 1)
+    http = Net::HTTP.new( uri.host, uri.port )
+    begin
+      resp = http.request( req )
+    rescue => err
+      puts err
+      return nil
+    end
+    
+    id = resp.body
+    return id[ 3..id.size ]
+  end
 
-def get_captcha_text( key, id )
-  data = { :key => key,
-           :action => 'get',
-           :id => id,
-           :min_len => 5,
-           :max_len => 5 }
-  uri = URI.parse('http://antigate.com/res.php' )
-  req = Net::HTTP::Post.new( uri.path )
-  http = Net::HTTP.new( uri.host, uri.port )
-  req.set_form_data( data )
+  def get_captcha_text( id )
+    data = { :key => @key,
+             :action => 'get',
+             :id => id,
+             :min_len => 5,
+             :max_len => 5 }
+    uri = URI.parse( "#{DEFAULT_API_URL}/res.php" )
+    req = Net::HTTP::Post.new( uri.path )
+    http = Net::HTTP.new( uri.host, uri.port )
+    req.set_form_data( data )
 
-  begin
-    resp = http.request(req)
-  rescue => err
-    puts err
+    begin
+      resp = http.request(req)
+    rescue => err
+      puts err
+      return nil
+    end
+    
+    text = resp.body
+    if text != "CAPCHA_NOT_READY"
+      return text[ 3..text.size ]
+    end
     return nil
   end
-  
-  text = resp.body
-  if text != "CAPCHA_NOT_READY"
-    return text[ 3..text.size ]
-  end#if
-  return nil
-end#def
 
-def report_bad( key, id )
-  data = { :key => key,
-           :action => 'reportbad',
-           :id => id }
-  uri = URI.parse('http://antigate.com/res.php' )
-  req = Net::HTTP::Post.new( uri.path )
-  http = Net::HTTP.new( uri.host, uri.port )
-  req.set_form_data( data )
+  def report_bad( id )
+    data = { :key => @key,
+             :action => 'reportbad',
+             :id => id }
+    uri = URI.parse( "#{DEFAULT_API_URL}/res.php" )
+    req = Net::HTTP::Post.new( uri.path )
+    http = Net::HTTP.new( uri.host, uri.port )
+    req.set_form_data( data )
 
-  begin
-    resp = http.request(req)
-  rescue => err
-    puts err
+    begin
+      resp = http.request(req)
+    rescue => err
+      puts err
+    end
   end
-end#def
+end #class Antigate
+
 
 def parse_phone(session)
   doc = Nokogiri::HTML(session.html)
@@ -119,15 +107,7 @@ def parse_phone(session)
   end
 end
 
-DB = Sequel.connect('postgres://localhost/car_monitor_development')
-dataset = DB[:cars]
-dataset.where('sold = false AND source_removed = false AND closed = false').where(phone: "").reverse_order(:created_at).each do |car|
-  puts "#{car[:id]} : #{car[:source_url]}"
-  # url = "http://spb.drom.ru/audi/rs7/19807562.html"
-  # url = "http://spb.drom.ru/nissan/patrol/20202232.html"
-  url = car[:source_url]
-  session = Capybara::Session.new(:poltergeist)
-  session.visit url 
+def click_show_buttons(session)
   unless session.html.include?('Внимание! Автомобиль продан,')
     if session.html.include?('Посмотреть карточку продавца')
         if session.html.include?("Показать телефон")
@@ -140,88 +120,96 @@ dataset.where('sold = false AND source_removed = false AND closed = false').wher
     end
   end
   sleep 2
+end
+
+# Register PhantomJS (aka poltergeist) as the driver to use
+Capybara.register_driver :poltergeist do |app|
+  Capybara::Poltergeist::Driver.new(app, 
+    timeout: 180, 
+    # js_errors: false,
+    phantomjs_options: [
+      # '--load-images=false', 
+      # "--proxy-auth=#{proxy.username}:#{proxy.password}",
+      # "--proxy=92.110.173.139:80",
+      '--disk-cache=false'
+      ])
+end
+
+include Capybara::DSL
+
+DB = Sequel.connect('postgres://localhost/car_monitor_development')
+dataset = DB[:cars]
+dataset.where('sold = false AND source_removed = false AND closed = false').where(phone: "").reverse_order(:created_at).each do |car|
+# dataset.where('sold = false AND source_removed = false AND closed = false').where(phone: "").order(:created_at).each do |car|
+  puts "#{car[:id]} : #{car[:source_url]}"
+  session = Capybara::Session.new(:poltergeist)
+  visit_state = false
+  while !visit_state do
+    begin
+      session.visit car[:source_url] 
+      visit_state = true
+    rescue Capybara::Poltergeist::TimeoutError => e
+      sleep rand(5*60..10*60)
+    end
+  end
+  click_show_buttons(session)
   phone = ""
   phone = parse_phone(session)
   phone.sub!(/\d\+/, ",+") if !phone.nil? && phone.length > 0
   puts phone
-  # binding.pry
   if !phone.nil? && phone != "" 
     car = dataset.filter(id: car[:id])
     car.update(
       phone: phone
     )
-    session.driver.quit  
     puts 'Updated'
     sleep rand(10..20)
-    next
+  else
+    doc = Nokogiri::HTML(session.html)
+    closed = doc.css('span.warning strong').text.include?("Объявление находится в архиве")
+    sold = doc.css('span.warning strong').text.include?("продан")
+    source_removed = doc.css('.adv-text .b-media-cont.b-media-cont_relative').first ? false : true
+    if sold || closed || source_removed
+      car = dataset.filter(id: car[:id])
+      car.update(
+        sold: sold,
+        closed: closed,
+        source_removed: source_removed
+      )
+      puts 'Sold or Closed or Removed'
+    elsif doc.css('img#captchaImageContainer').empty?
+      puts 'No captcha or Phone'
+    else
+      captcha_filename = 'captcha.jpeg'
+      session.save_screenshot(captcha_filename, :selector => 'img#captchaImageContainer')
+      ag_api = AntigateAPIClient.new( ENV['ANITGATE_KEY'] )
+      id = ag_api.send_captcha( captcha_filename )
+      sleep( 10 ) # recognition_time
+      code = nil
+      while code == nil do
+        code = ag_api.get_captcha_text( id )
+        sleep 1
+      end
+      puts 'captcha: ' + code
+      unless code.include?("error_")
+        next if doc.css('#captchaInputContainer input').empty?
+        input = session.find('#captchaInputContainer input')
+        input.set(code.force_encoding('UTF-8').downcase)
+        session.click_button('captchaSubmitButton') 
+        sleep 5
+        phone = parse_phone(session)
+        phone.sub!(/\d\+/, ",+") if !phone.nil? && phone.length > 0
+        puts phone
+        if !phone.nil? && phone != "" 
+          car = dataset.filter(id: car[:id])
+          car.update(
+            phone: phone
+          )
+          puts 'Updated'
+        end
+        # session.save_screenshot('page.jpeg', :selector => '.adv-text')
+      end
+    end
   end
-  doc = Nokogiri::HTML(session.html)
-  closed = doc.css('span.warning strong').text.include?("Объявление находится в архиве")
-  sold = doc.css('span.warning strong').text.include?("продан")
-  source_removed = doc.css('.adv-text .b-media-cont.b-media-cont_relative').first ? false : true
-  if sold || closed || source_removed
-    # binding.pry
-    car = dataset.filter(id: car[:id])
-    car.update(
-      sold: sold,
-      closed: closed,
-      source_removed: source_removed
-    )
-    session.driver.quit  
-    puts 'Sold or Closed or Removed'
-    next
-  end
-  if doc.css('img#captchaImageContainer').empty?
-    session.driver.quit  
-    puts 'No captcha or Phone'
-    next
-  end
-  # binding.pry
-  session.save_screenshot('captcha.jpeg', :selector => 'img#captchaImageContainer')
-  # response = RestClient.post 'http://anti-captcha.com/in.php',
-  #                  :key => ENV['ANITGATE_KEY'], 
-  #                  :file => File.new("captcha.jpeg", 'rb')
-  # response = RestClient.get 'http://anti-captcha.com/res.php',
-  #                  :key => ENV['ANITGATE_KEY'], 
-  #                  :action => 'get',
-  #                  :file => File.new("captcha.jpeg", 'rb')
-  # if response.code == 200
-  #   # case JSON.parse(JSON.parse(response)["result"][0])["Result"]
-  # end
-  key = ENV['ANITGATE_KEY']
-  captcha = 'captcha.jpeg'
-  recognition_time = 10
-  #recognize capcha
-  id = send_captcha( key, captcha )
-  sleep( recognition_time )
-  code = nil
-  while code == nil do
-    code = get_captcha_text( key, id )
-    sleep 1
-  end#while
-  puts 'captcha: ' + code
-  if code == "error_captcha_unsolvable"
-    session.driver.quit  
-    next 
-  end
-  input = session.find('#captchaInputContainer input')
-  input.set(code.force_encoding('UTF-8').downcase)
-  session.click_button('captchaSubmitButton') 
-  sleep 5
-  phone = parse_phone(session)
-  phone.sub!(/\d\+/, ",+") if !phone.nil? && phone.length > 0
-  puts phone
-  # binding.pry
-  if !phone.nil? && phone != "" 
-    car = dataset.filter(id: car[:id])
-    car.update(
-      phone: phone
-    )
-    puts 'Updated'
-    session.driver.quit  
-    next
-  end
-  # session.save_screenshot('page.jpeg', :selector => '.adv-text')
   session.driver.quit  
 end
-
