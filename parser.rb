@@ -127,7 +127,8 @@ firms = {
   'citroen' => []
 }
 min_year = 1995
-# min_year = 2005
+# min_year = 2014
+# max_year = 1995
 max_year = 2015
 minprice = 200000
 maxprice = 2000000
@@ -344,12 +345,12 @@ if rub_table_search
       minprice = price
       maxprice = price + price_step
       maxprice = end_price if maxprice > end_price
-      next if maxprice == minprice
+      next if maxprice == minprice && end_price != beg_price
       (beg_year..end_year).step( year_step ) do |year|
         min_year = year
         max_year = year + year_step
         max_year = Date.today.year if max_year > Date.today.year
-        next if max_year == min_year
+        next if max_year == min_year && end_year != beg_year
         url = generate_url(region, firms, firm_id, firm_cnt, model_id, model_cnt, min_year, max_year, minprice, maxprice, transmission_id, privod)
         loop do
           cnt = 0
@@ -519,6 +520,20 @@ def parse_phone(session)
   end
 end
 
+
+# Register PhantomJS (aka poltergeist) as the driver to use
+Capybara.register_driver :poltergeist do |app|
+  Capybara::Poltergeist::Driver.new(app, 
+    timeout: 180, 
+    # js_errors: false,
+    phantomjs_options: [
+      # '--load-images=false', 
+      # "--proxy-auth=#{proxy.username}:#{proxy.password}",
+      # "--proxy=91.197.191.65:9090",
+      '--disk-cache=false'
+      ])
+end
+
 # off = 1058 - dataset.order(:id).first[:id] 
 # off = 400
 # dataset.offset(off).each do |car|
@@ -535,7 +550,16 @@ if rub_details_scrape
     # next if car[:created_at] != car[:updated_at]
     puts "#{car[:id]} : #{car[:source_url]}"
     session = Capybara::Session.new(:poltergeist)
-    session.visit car[:source_url]
+    # session.visit car[:source_url]
+    visit_state = false
+    while !visit_state do
+      begin
+        session.visit car[:source_url]
+        visit_state = true
+      rescue Capybara::Poltergeist::TimeoutError => e
+        sleep rand(5*60..10*60)
+      end
+    end
     unless session.html.include?('Внимание! Автомобиль продан,')
       if session.html.include?('Посмотреть карточку продавца')
           if session.html.include?("Показать телефон")
@@ -543,15 +567,14 @@ if rub_details_scrape
           else
             unless session.all('a[href$="mailto:"]').empty?
               session.find('a[href$="mailto:"]').hover
-              sleep 2
             end
           end
       else
-        # binding.pry
         unless session.all('#show_contacts > span.b-button__text').empty?
           session.click_button("Показать телефон")
         end
       end
+      sleep 2
     end
     doc = Nokogiri::HTML(session.html)
     # binding.pry
