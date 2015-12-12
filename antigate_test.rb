@@ -139,7 +139,9 @@ include Capybara::DSL
 
 DB = Sequel.connect('postgres://localhost/car_monitor_development')
 dataset = DB[:cars]
-dataset.where('sold = false AND source_removed = false AND closed = false').where(phone: "").or(phone: nil).reverse_order(:created_at).each do |car|
+dataset.where(sold: false, source_removed:false, closed: false, phone: "").
+          or(sold: false, source_removed:false, closed: false, phone: nil).
+          reverse_order(:created_at).each do |car|
 # dataset.where('sold = false AND source_removed = false AND closed = false').where(phone: "").order(:created_at).each do |car|
   puts "#{car[:id]} : #{car[:source_url]}"
   session = Capybara::Session.new(:poltergeist)

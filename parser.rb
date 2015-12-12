@@ -670,7 +670,8 @@ if rub_details_scrape
           sleep 1
         end#while
         puts 'captcha: ' + code
-        unless code.include?("error_")
+        if !["error_", "CAPTCHA_UNSOLVABLE"].include?(code) && !doc.css('#captchaInputContainer input').empty? && !doc.css('img#captchaImageContainer').first.attribute('src').value.include?("404/empty")
+          # binding.pry
           input = session.find('#captchaInputContainer input')
           input.set(code.force_encoding('UTF-8').downcase)
           session.click_button('captchaSubmitButton') 
