@@ -355,6 +355,7 @@ if rub_table_search
         loop do
           cnt = 0
           upd_cnt = 0
+          price_cnt = 0
           print url
           # sleep rand(5..20)
           session = Capybara::Session.new(:poltergeist)
@@ -376,7 +377,11 @@ if rub_table_search
                 current_car = scrape_table_row(item, firms, firm_id, model_id, brands_set, models_set)
                 # cars << current_car
                 car = dataset.where(source_url: current_car[:source_url]).first
+                # binding.pry
                 unless car
+                  current_car[:price_initial] = current_car[:cost]
+                  current_car[:price_current] = current_car[:cost]
+                  current_car[:new_price_date] = DateTime.now
                   dataset.insert(current_car)
                   cnt += 1
                 else
@@ -384,9 +389,19 @@ if rub_table_search
                     # print " '#{ car[:id] }' "
                     car = dataset.filter(id: car[:id])
                     car.update(
-                      sold: current_car[:sold]
+                      sold: current_car[:sold],
+                      row_parsed_at: current_car[:row_parsed_at]
                     )
                     upd_cnt += 1
+                  elsif car[:price_current] != current_car[:cost]
+                    car = dataset.filter(id: car[:id])
+                    car.update(
+                      price_current:  current_car[:cost],
+                      price_previous: car.first[:price_current], 
+                      new_price_date: DateTime.now,
+                      row_parsed_at:  current_car[:row_parsed_at]
+                    )
+                    price_cnt += 1
                   end
                 end
             end
@@ -395,20 +410,33 @@ if rub_table_search
                 # cars << current_car
                 car = dataset.where(source_url: current_car[:source_url]).first
                 unless car
+                  current_car[:price_initial] = current_car[:cost]
+                  current_car[:price_current] = current_car[:cost]
+                  current_car[:new_price_date] = DateTime.now
                   dataset.insert(current_car)
                   cnt += 1
                 else
                   if car[:sold] != current_car[:sold]
                     car = dataset.filter(id: car[:id])
                     car.update(
-                      sold: current_car[:sold]
+                      sold: current_car[:sold],
+                      row_parsed_at: current_car[:row_parsed_at]
                     )
                     upd_cnt += 1
+                  elsif car[:price_current] != current_car[:cost]
+                    car = dataset.filter(id: car[:id])
+                    car.update(
+                      price_current:  current_car[:cost],
+                      price_previous: car.first[:price_current], 
+                      new_price_date: DateTime.now,
+                      row_parsed_at: current_car[:row_parsed_at]
+                    )
+                    price_cnt += 1
                   end
                 end
             end
           end
-          print " : #{cnt} : #{upd_cnt}\n"
+          print " : #{cnt} : #{upd_cnt} : #{price_cnt}\n"
           pager = doc.css('.pager')
           # binding.pry
           if pager && (pager.css('> a').text == "Следующая" || pager.css('> a:last').text == "Следующая" )
@@ -543,7 +571,11 @@ if rub_details_scrape
   # dataset.where('created_at < ? AND updated_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60).each do |car|
   # dataset.where('id > 15461 AND sold = false AND source_removed = false').each do |car|
   # dataset.where('created_at < ? AND sold = false AND source_removed = false', Time.now - 12*60*60 ).reverse_order(:created_at).each do |car|
-  dataset.where('sold = false AND source_removed = false').where(photos: nil).reverse_order(:created_at).each do |car|
+  # dataset.where(sold: true, phone: "").or(sold: true, phone: nil).
+  #         or(source_removed: true, phone: "").or(source_removed: true, phone: nil).
+  #         or(closed: true, phone: "").or(closed: true, phone: nil).
+  #         reverse_order(:created_at).each do |car|
+  dataset.where('sold = false AND closed = false AND source_removed = false').where(photos: nil).reverse_order(:created_at).each do |car|
   # dataset.where("year = 2015 AND seller_source_url IS NOT NULL AND equipment_name IS NOT NULL").reverse_order(:created_at).each do |car|
   # dataset.where(id:[23321, 23320, 18317, 8899]).reverse_order(:created_at).each do |car|
   # dataset.where(id:13815).reverse_order(:created_at).each do |car|
@@ -555,6 +587,7 @@ if rub_details_scrape
     while !visit_state do
       begin
         session.visit car[:source_url]
+        session.execute_script('if (localStorage && localStorage.clear) localStorage.clear()')
         visit_state = true
       rescue Capybara::Poltergeist::TimeoutError => e
         sleep rand(5*60..10*60)
