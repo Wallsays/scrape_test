@@ -99,8 +99,8 @@ domain = "auto.drom.ru"
 # region = '' 
 region = 'region54'
 firms = {
-  'toyota' => [], 
-  'mazda' => [], 
+  # 'toyota' => [], 
+  # 'mazda' => [], 
   'nissan' => [],
   'honda' => [], 
   'mitsubishi' => [], 
@@ -126,11 +126,11 @@ firms = {
   'ssang_yong' => [],
   'citroen' => []
 }
-min_year = 1995
-# min_year = 2014
+# min_year = 1995
+min_year = 2015
 # max_year = 1995
 max_year = 2015
-minprice = 200000
+minprice = 1000000
 maxprice = 2000000
 # transmission_id = 2 # autoamatic
 # privod = 2 # 1 - передний, 2 - задний, 3 - 4WD 
@@ -278,11 +278,13 @@ def scrape_table_row(item, firms, firm_id, model_id, brands_set, models_set)
     brands_set.insert({
       title: brand,
       created_at: DateTime.now,
-      updated_at: DateTime.now
+      updated_at: DateTime.now,
+      slug: brand.downcase.gsub(' ', '_').gsub("'", '')
     })
     brd = brands_set.filter(title: brand)
   end
   # binding.pry
+  model.strip!
   mdl = models_set.filter(title: model, brand_id: brd.first[:id])
   if mdl.first.nil?
     models_set.insert({
@@ -290,7 +292,8 @@ def scrape_table_row(item, firms, firm_id, model_id, brands_set, models_set)
       brand_id: brd.first[:id], 
       # rate: model_rate,
       created_at: DateTime.now,
-      updated_at: DateTime.now
+      updated_at: DateTime.now,
+      slug: model.downcase.gsub(' ', '_').gsub("'", '')
     })
     mdl = models_set.filter(title: model, brand_id: brd.first[:id])
   # elsif mdl.first[:rate].nil?
@@ -325,7 +328,8 @@ def scrape_table_row(item, firms, firm_id, model_id, brands_set, models_set)
     broken: broken,
     created_at: DateTime.now,
     updated_at: DateTime.now,
-    row_parsed_at: DateTime.now
+    row_parsed_at: DateTime.now,
+    origin_site_id: 1 # drom
   }
 end
 
@@ -364,6 +368,7 @@ if rub_table_search
           while !visit_state do
             begin
               session.visit url
+              session.execute_script('if (localStorage && localStorage.clear) localStorage.clear()')
               visit_state = true
             rescue Capybara::Poltergeist::TimeoutError => e
               sleep rand(5*60..10*60)
@@ -730,6 +735,7 @@ if rub_details_scrape
           photos << pic
         end
       end
+      photos_count = photos.map{ |v| v if v.include?('/tn_') }.uniq.reject { |c| c.nil? || c.empty? }.size unless photos.empty?
 
       model_rate = unless doc.css('.b-sticker.b-sticker_theme_rating').empty?
         doc.css('.b-sticker.b-sticker_theme_rating').first.child.next.text.to_f
@@ -741,7 +747,8 @@ if rub_details_scrape
         brands_set.insert({
           title: car[:brand],
           created_at: DateTime.now,
-          updated_at: DateTime.now
+          updated_at: DateTime.now,
+          slug: car[:brand].downcase.gsub(' ', '_').gsub("'", '')
         })
         brd = brands_set.filter(title: car[:brand])
       end
@@ -753,7 +760,8 @@ if rub_details_scrape
           brand_id: brd.first[:id], 
           rate: model_rate,
           created_at: DateTime.now,
-          updated_at: DateTime.now
+          updated_at: DateTime.now,
+          slug: car[:model].downcase.gsub(' ', '_').gsub("'", '')
         })
         mdl = models_set.filter(title: car[:model], brand_id: brd.first[:id])
       elsif mdl.first[:rate].nil?
@@ -762,7 +770,6 @@ if rub_details_scrape
           updated_at: DateTime.now
         })
       end
-
       car = dataset.filter(id: car[:id])
       car.update(
         seller_address: seller_address,
@@ -784,6 +791,7 @@ if rub_details_scrape
         details: details,
         sold: sold,
         photos: photos.join(','),
+        photos_count: photos_count,
         phone: phone,
         seller_email: seller_email,
         seller_city:  seller_city,
