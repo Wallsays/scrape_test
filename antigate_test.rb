@@ -157,7 +157,11 @@ dataset.where(sold: false, source_removed:false, closed: false, phone: "").
   click_show_buttons(session)
   phone = ""
   phone = parse_phone(session)
-  phone.sub!(/\d\+/, ",+") if !phone.nil? && phone.length > 0
+  if !phone.nil? && phone.length > 0 && phone.index('+', 5).to_i > 5
+    st = phone.index('+', 5)
+    fn = st + 1 
+    phone[st..fn] = ',+7'
+  end
   puts phone
   if !phone.nil? && phone != "" 
     car = dataset.filter(id: car[:id])
@@ -200,7 +204,11 @@ dataset.where(sold: false, source_removed:false, closed: false, phone: "").
         session.click_button('captchaSubmitButton') 
         sleep 5
         phone = parse_phone(session)
-        phone.sub!(/\d\+/, ",+") if !phone.nil? && phone.length > 0
+        if !phone.nil? && phone.length > 0 && phone.index('+', 5).to_i > 5
+          st = phone.index('+', 5)
+          fn = st + 1 
+          phone[st..fn] = ',+7'
+        end
         puts phone
         if !phone.nil? && phone != "" 
           car = dataset.filter(id: car[:id])

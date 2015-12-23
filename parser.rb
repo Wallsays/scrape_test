@@ -99,8 +99,8 @@ domain = "auto.drom.ru"
 # region = '' 
 region = 'region54'
 firms = {
-  # 'toyota' => [], 
-  # 'mazda' => [], 
+  'toyota' => [], 
+  'mazda' => [], 
   'nissan' => [],
   'honda' => [], 
   'mitsubishi' => [], 
@@ -126,11 +126,11 @@ firms = {
   'ssang_yong' => [],
   'citroen' => []
 }
-# min_year = 1995
-min_year = 2015
+min_year = 1995
+# min_year = 2015
 # max_year = 1995
 max_year = 2015
-minprice = 1000000
+minprice = 200000
 maxprice = 2000000
 # transmission_id = 2 # autoamatic
 # privod = 2 # 1 - передний, 2 - задний, 3 - 4WD 
@@ -580,7 +580,8 @@ if rub_details_scrape
   #         or(source_removed: true, phone: "").or(source_removed: true, phone: nil).
   #         or(closed: true, phone: "").or(closed: true, phone: nil).
   #         reverse_order(:created_at).each do |car|
-  dataset.where('sold = false AND closed = false AND source_removed = false').where(photos: nil).reverse_order(:created_at).each do |car|
+  dataset.where(sold: false, closed: false, source_removed: false, photos: nil).
+          or(sold: false, closed: false, source_removed: false, photos_count: 0).reverse_order(:created_at).each do |car|
   # dataset.where("year = 2015 AND seller_source_url IS NOT NULL AND equipment_name IS NOT NULL").reverse_order(:created_at).each do |car|
   # dataset.where(id:[23321, 23320, 18317, 8899]).reverse_order(:created_at).each do |car|
   # dataset.where(id:13815).reverse_order(:created_at).each do |car|
@@ -692,7 +693,11 @@ if rub_details_scrape
         doc.css('a:contains("Посмотреть карточку продавца")').first.attribute('href').value
       end
       phone = parse_phone(session)
-      phone.sub!(/\d\+/, ",+") if !phone.nil? && phone.length > 0
+      if !phone.nil? && phone.length > 0 && phone.index('+', 5).to_i > 5
+        st = phone.index('+', 5)
+        fn = st + 1 
+        phone[st..fn] = ',+7'
+      end
       if (phone.nil? || phone == "") && !doc.css('img#captchaImageContainer').empty?
         # session.save_screenshot('page.jpeg', :selector => '.adv-text')
         session.save_screenshot('captcha.jpeg', :selector => 'img#captchaImageContainer')
@@ -735,7 +740,7 @@ if rub_details_scrape
           photos << pic
         end
       end
-      photos_count = photos.map{ |v| v if v.include?('/tn_') }.uniq.reject { |c| c.nil? || c.empty? }.size unless photos.empty?
+      photos_count = photos.flatten.map{ |v| v if v.include?('/tn_') }.uniq.reject { |c| c.nil? || c.empty? }.size unless photos.empty?
 
       model_rate = unless doc.css('.b-sticker.b-sticker_theme_rating').empty?
         doc.css('.b-sticker.b-sticker_theme_rating').first.child.next.text.to_f
@@ -813,7 +818,8 @@ if rub_details_scrape
 end
 # binding.pry
 
-if run_db_migrate_to_rails
+# if run_db_migrate_to_rails 
+if false 
   DB_RAILS = Sequel.connect('postgres://localhost/car_monitor_development')
   # dataset = DB[:cars]
   dataset_rails = DB_RAILS[:cars]
