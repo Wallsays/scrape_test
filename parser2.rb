@@ -89,6 +89,8 @@ ARGV.each do|a|
   run_email_phone_parse = true if a.to_i == 3
 end
 
+start_time = Time.now
+
 DB = Sequel.connect('postgres://localhost/car_monitor_development')
 $dataset    = DB[:cars]
 $brands_set = DB[:brands]
@@ -359,34 +361,46 @@ end
 
 
 def parse_callback(url, response, parse_options)
-  # binding.pry
-  $cnt = 0
-  $upd_cnt = 0
-  $price_cnt = 0
-  print url
-  # puts 
-  # binding.pry
-  # puts "queued_requests.size: #{$hydra.queued_requests.size}"
-  doc = Nokogiri::HTML(response.body)
-  unless doc.css('.subscriptions_link_wrapper').empty?
-    doc.css('.subscriptions_link_wrapper').first.parent.css('tr.row').each do |item|
-        insert_data(item, parse_options[:firms], parse_options[:firm_id], parse_options[:model_id])
+  if response.return_code.to_s == "got_nothing"
+    puts response.return_code
+    req = Typhoeus::Request.new(url, $options)
+    req.on_complete do |response|
+      parse_callback(url, response, parse_options)
     end
-    doc.css('.subscriptions_link_wrapper').first.parent.css('tr.h').each do |item|
-        insert_data(item, parse_options[:firms], parse_options[:firm_id], parse_options[:model_id])
+    $hydra.queue req
+    sleep rand(10..15)
+  elsif response.code == 200
+    $cnt = 0
+    $upd_cnt = 0
+    $price_cnt = 0
+    print url
+    # puts 
+    # binding.pry
+    # puts "queued_requests.size: #{$hydra.queued_requests.size}"
+    doc = Nokogiri::HTML(response.body)
+    unless doc.css('.subscriptions_link_wrapper').empty?
+      doc.css('.subscriptions_link_wrapper').first.parent.css('tr.row').each do |item|
+          insert_data(item, parse_options[:firms], parse_options[:firm_id], parse_options[:model_id])
+      end
+      doc.css('.subscriptions_link_wrapper').first.parent.css('tr.h').each do |item|
+          insert_data(item, parse_options[:firms], parse_options[:firm_id], parse_options[:model_id])
+      end
     end
+    print " : #{$cnt} : #{$upd_cnt} : #{$price_cnt}\n"
+    pager = doc.css('.pager')
+    # binding.pry
+    if pager && (pager.css('> a').text == "Следующая" || pager.css('> a:last').text == "Следующая" )
+      url = pager.css(' > a:last').attribute('href').value
+      queue_req(url, parse_options)
+    elsif parse_options[:model_id] && parse_options[:model_cnt] < ((parse_options[:model_id].size) - 1)
+      parse_options[:model_cnt] += 1
+      url = generate_url(parse_options)
+      queue_req(url, parse_options)
+    end
+  else
+    binding.pry
   end
-  print " : #{$cnt} : #{$upd_cnt} : #{$price_cnt}\n"
-  pager = doc.css('.pager')
-  # binding.pry
-  if pager && (pager.css('> a').text == "Следующая" || pager.css('> a:last').text == "Следующая" )
-    url = pager.css(' > a:last').attribute('href').value
-    queue_req(url, parse_options)
-  elsif parse_options[:model_id] && parse_options[:model_cnt] < ((parse_options[:model_id].size) - 1)
-    parse_options[:model_cnt] += 1
-    url = generate_url(parse_options)
-    queue_req(url, parse_options)
-  end
+  sleep rand(1..100).to_f/100
 end
 
 def queue_req(url, parse_options)
@@ -640,12 +654,17 @@ def detailed_scrape(car, response)
         end
         $hydra.queue req
         sleep rand(10..15)
-      elsif response.return_code == 200
-        binding.pry
+      elsif response.code == 404
+        # binding.pry
         car = $dataset.filter(id: car[:id])
         car.update(
           source_removed: true
         )
+      else
+        # Объявление на премодерации!
+        #   OR 
+        # nil in item while it isn't
+        binding.pry
       end
     end
     sleep rand(1..100).to_f/100
@@ -709,7 +728,7 @@ end
 if run_email_phone_parse
   $dataset.where(sold: false, source_removed:false, closed: false, phone: "").
           or(sold: false, source_removed:false, closed: false, phone: nil).
-          or('sold = false AND source_removed = false AND closed = false AND seller_source_url IS NOT NULL AND seller_email IS NULL').
+          # or('sold = false AND source_removed = false AND closed = false AND seller_source_url IS NOT NULL AND seller_email IS NULL').
   # $dataset.where('sold = false AND source_removed = false AND closed = false AND length(phone) = 34').
           reverse_order(:created_at).each do |car|
     # binding.pry
@@ -803,3 +822,21 @@ if run_email_phone_parse
     session.driver.quit  
   end
 end
+
+
+def time_diff(start_time, end_time)
+  seconds_diff = (start_time - end_time).to_i.abs
+
+  hours = seconds_diff / 3600
+  seconds_diff -= hours * 3600
+
+  minutes = seconds_diff / 60
+  seconds_diff -= minutes * 60
+
+  seconds = seconds_diff
+
+  "#{hours.to_s.rjust(2, '0')}:#{minutes.to_s.rjust(2, '0')}:#{seconds.to_s.rjust(2, '0')}"
+end
+
+puts time_diff(start_time, Time.now)
+
